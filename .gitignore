@@ -1,0 +1,34 @@
+# macOS
+.DS_Store
+._*
+.AppleDouble
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python (在 scripts/ 目录可能出现)
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Node (skill 可能附带 node 工具)
+node_modules/
+*.log
+
+# Skill workspaces (skill-creator eval 工作产物)
+*-workspace/
+iteration-*/
+
+# 临时 / 个人运行时数据 — 任何 skill 都不应把真实交易数据 commit 上来
+**/portfolio/
+**/reports/
+**/holdings.local.md
+
+# 备份
+*.bak
+*.orig
