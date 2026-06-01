@@ -1,6 +1,6 @@
 ---
 name: a-share-mainboard-daily-picker
-description: A股主板晚间复盘 + 明日预案 skill。夜间盘后用 agent-browser 抓同花顺/东方财富/巨潮的最新数据，给出大盘ABC级、情绪温度、持仓诊断、明日候选池和分票型操作预案。Use this whenever the user asks 选股、复盘、看持仓、明日操作、A股主板、今日选什么、给我看下账户、帮我盯盘 — 即使没有明说"复盘"或"选股"二字。Never pick from memory; always pull fresh data via agent-browser.
+description: A股主板晚间复盘 + 明日预案 skill。夜间盘后调本目录的数据脚本（curl 东财/巨潮后台 JSON API，可 fallback 到 iTick / agent-browser）拉最新结构化数据，给出大盘 ABC 级、情绪温度、板块阶段、持仓诊断、明日候选池和分票型操作预案。Use this whenever the user asks 选股、复盘、看持仓、明日操作、A股主板、今日选什么、给我看下账户、帮我盯盘 — 即使没有明说"复盘"或"选股"二字。Never pick from memory; always run scripts/data/*.sh for fresh structured data — never feed LLM-mediated tools (i问财, AI 选股助手) and never fabricate.
 ---
 
 # A股主板晚间复盘 + 明日预案
@@ -10,8 +10,9 @@ description: A股主板晚间复盘 + 明日预案 skill。夜间盘后用 agent
 
 - 大盘判级（A/B/C）
 - 当晚情绪温度（涨停/连板/龙头存活）
+- 板块阶段定位（主升 / 新启动 / 补涨 / 轮动 / 退潮 / 修复）
 - 持仓诊断（每只过结构和卖点信号）
-- 明日候选池（按票型分类）
+- 明日候选池（按板块阶段 → 票型分类）
 - 明日操作预案（仓位、加减、止损、纪律红线）
 
 记住用户最看重的两句话：
@@ -34,13 +35,13 @@ description: A股主板晚间复盘 + 明日预案 skill。夜间盘后用 agent
 
 ## 不可违反的硬规则（Hard rules）
 
-1. **永远不凭记忆选股**。每次运行必须用 agent-browser 拉**当晚最新**数据。无法核验则在报告里写"数据缺口"，不许编。
-2. **只用原始可信数据源**（详见 `references/data-sources.md`）：
-   - 第一档：巨潮资讯网、上交所/深交所原文公告、定期报告。
-   - 第二档：东方财富、同花顺的**原始页面**（行情、F10、资金流、板块、龙虎榜）。读原始 DOM / accessibility tree，必要时截图给 vision；**不归档**。
-   - 第三档：券商研报**只取数字事实**，不抄"买入/目标价/推荐"。
-   - **❌ 禁止使用任何 LLM 中介工具**：同花顺 i问财、AI 选股助手、券商 AI、ChatGPT 插件等——这些会让真值被改写。
-   - 拒绝来源：股吧、公众号小作文、短视频截图、群聊、未署名"市场传闻"。
+1. **永远不凭记忆选股**。每次运行必须调本目录下的数据脚本（`scripts/data/*.sh`）拉**当晚最新**数据。脚本失败则在报告里写"数据缺口 + 低置信度"，**绝不允许**编造、估算、或基于训练数据"补"上数字。
+2. **数据获取必须走脚本**（详见 `scripts/data/README.md` 与 `references/data-sources.md`）：
+   - 所有行情、K线、板块、涨停、北向、龙虎榜、财务、公告全部调 `./scripts/data/<name>.sh` 取得**结构化 JSON**
+   - 默认 fallback chain：东方财富后台 JSON API（主）→ iTick（官方稳定 fallback，需 `ITICK_TOKEN`）→ agent-browser（最后兜底）
+   - 脚本退出非零 → 重试 1 次 → 仍失败才走 agent-browser，**且必须在报告里标注降级**
+   - **❌ 禁止使用任何 LLM 中介工具**：同花顺 i问财、AI 选股助手、ChatGPT 插件等——它们会让真值被改写
+   - 拒绝来源：股吧、公众号小作文、短视频截图、群聊、未署名"市场传闻"
 3. **股票池白名单**：默认 A股主板，按代码前缀过滤；用户明确说"看创业板/科创板"才放开。
 4. **板块先行**：选个股**之前**必须先做板块筛选（见 `references/sector-screening.md`）。任何候选都必须能回答"属于哪个板块、板块当前是什么阶段"。板块不在主升/新启动/修复中，**不选个股**。
 5. **不追高的硬阈值**：5D 涨幅 > 20% 或 20D > 35% 或 60D > 60% → 价格位置维度封顶 8 分，并标注"追高风险"。除非有用户**明确要求**做加速。
@@ -53,76 +54,115 @@ description: A股主板晚间复盘 + 明日预案 skill。夜间盘后用 agent
 
 **核心顺序**：大盘 → 情绪 → **板块** → 持仓 → 个股 → 红线。板块在个股之前，因为「和板块趋势相悖是不明智的」。
 
-每次被调用时按这个顺序走，逐步在用户面前汇报进度。
+每次被调用时按这个顺序走，逐步在用户面前汇报进度。所有数据获取**必须**通过 `scripts/data/*.sh`，输出是统一 JSON（见 `scripts/data/README.md`）。
 
 ### Step 1 — 准备
 1. 读取 `~/AiCodingWorkspace/stock/portfolio/holdings.md`（用户的持仓）。如果文件不存在，按 `templates/holdings.md` 提示用户先建好，或本次先跳过持仓评估。
 2. 读取 `references/experience-notes.md`，把任何用户已沉淀的硬规则套到本次。
 3. 确认当前交易日（用户机器本地时间，A股北京时间）。如果今天是周末或节假日且没有新公告，明确告诉用户"按上一个交易日 + 今晚公告"分析。
 
-### Step 2 — 启动 agent-browser
+### Step 2 — 验证数据脚本可用
 ```bash
-agent-browser skills get core
+cd ~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker
+./scripts/data/quote.sh 600519 | jq '.meta.source, .data.price'
 ```
-**先跑这条获取最新工作流命令**。不要在 SKILL.md 里硬编码 `navigate`/`click` 等子命令——agent-browser 版本会变。
+应该看到 `"eastmoney"` + 一个数字。如果失败：
+1. 重试 1 次
+2. 仍失败 → 走 `SOURCE=itick`（需 `export ITICK_TOKEN=xxx`）
+3. iTick 也挂 → 才使用 agent-browser 兜底（先 `agent-browser skills get core` 拿命令），**且报告里必须标注"主源降级"**
 
-会话目标：
-- **只读原始页面**（DOM / accessibility tree）；DOM 拿不到时截图给 vision，**不归档**。
-- **不允许调用任何 LLM 中介工具**（i问财、AI 选股助手等会改写真值的源）。
-- 一次会话复用同一个浏览器实例，最后清理。
+**禁止**：不要硬编码 `navigate`/`click` 等浏览器子命令；不要调任何 LLM 中介源（i问财等）。
 
 ### Step 3 — 大盘判级（A/B/C）
-打开东方财富上证指数页（`https://quote.eastmoney.com/zs000001.html`）和深证成指、创业板指（创业板仅作交叉参考，主板才是主战场）。
+
+```bash
+./scripts/data/index_quote.sh sh    # 上证
+./scripts/data/index_quote.sh sz    # 深证
+./scripts/data/index_quote.sh cyb   # 创业板（仅作交叉参考）
+./scripts/data/north_flow.sh        # 北向资金
+./scripts/data/kline.sh sh 5 1d     # 上证近 5 日 K 线（看量能）
+```
 
 按 `references/playbooks.md` 的「**黄白线五眼框架**」给今天定级：
 - A 级：黄≥白 + 放量 + 资金净流入 → 短线 30–40%、中线 40–50%、现金 10–20%
 - B 级：白稳黄略弱 → 短线 10–20%、中线 40%、现金 40–50%
 - C 级：黄明显弱于白 + 缩量/放量下跌 + 资金持续流出 → 短线 0–5%、中线 ≤ 20%、现金 ≥ 70%
 
-把级别和理由写到报告头部。
+> 备注：黄白线分时图是**盘中**指标。本 skill 是夜间运行 → 用当日上证收盘 + 涨幅家数比例 + 当日资金流 + 当日主板平均涨幅与上证涨幅之差来近似判断：
+> - 涨停 - 跌停 ≥ 50 + 北向净流入 + 上证未跌 → 倾向 A 级
+> - 涨跌停接近 + 北向小幅 + 上证小幅震荡 → B 级
+> - 涨停 < 跌停 + 北向流出 + 上证下跌 → C 级
 
 ### Step 4 — 情绪温度
-打开**东方财富涨停板池**（`https://quote.eastmoney.com/center/gridlist.html#zt_pool`），用同花顺 `http://q.10jqka.com.cn/zt/` 交叉验证。提取：
 
-- 涨停家数、跌停家数（剔除 ST）
-- 连板梯队最高板数、连板数 ≥ 3 的票数
-- 昨日龙头今日表现（涨停 / 高开不封 / 低开破板）— 这是**情绪冰点的提前信号**之一
-- 首板晋级率（昨日首板 → 今日二板的比例），< 30% 视为退潮信号
+```bash
+./scripts/data/limit_up_pool.sh   | tee /tmp/lup.json | jq '.data | {total, mainboard_count, max_consecutive, ladder_3plus_count}'
+./scripts/data/limit_down_pool.sh | tee /tmp/ldp.json | jq '.data.total'
+./scripts/data/dragon_tiger.sh    > /tmp/dt.json
+```
 
-按 `references/playbooks.md` 的「退潮期 / 情绪冰点」章节判断今天是否处于退潮期、是否冰点临近。
+提取：
+- 涨停家数（剔除 ST）：`jq '.data.stocks | map(select(.name | contains("ST") | not)) | length' /tmp/lup.json`
+- 主板涨停家数：`.data.mainboard_count`
+- 最高连板：`.data.max_consecutive`
+- 连板 ≥ 3 票数：`.data.ladder_3plus_count`
+- 跌停家数：`/tmp/ldp.json` 取 `.data.total`
+- 首板晋级率：今天 ladder_count==2 数量 ÷ 昨天 ladder_count==1 数量；< 30% 视为退潮
+
+按 `references/playbooks.md` 的「退潮期 / 情绪冰点」章节判断今天是否退潮、是否冰点临近。
 
 ### Step 5 — **板块筛选（先于个股）**
 **这是选个股的前置门槛。** 详细流程见 `references/sector-screening.md`。
 
-打开东方财富**概念板块** + **行业板块**涨幅榜，做 6 步筛选：
-1. 拉今日涨幅 Top 10、跌幅 Top 5、成交额 Top 10 的并集
-2. 给每个候选板块定阶段：**主升 / 新启动 / 补涨 / 轮动 / 退潮 / 修复**
-3. 检查板块**宽度**（板内上涨家数比例）— < 50% 上涨即使板块涨幅大也是伪板块，不入选
-4. 检查板块**持续性**（近 5 日 K 线，连续放量上涨 vs 量逐日萎缩）
-5. 北向资金 + 龙虎榜验证（席位偏好）
-6. 输出板块概览（5–10 行），明确哪些板块"可在板内选个股"、哪些"必须减仓"、哪些"完全不碰"
+```bash
+./scripts/data/sector_rank.sh concept   > /tmp/sec_concept.json
+./scripts/data/sector_rank.sh industry  > /tmp/sec_industry.json
+```
 
-**只有处于主升 / 新启动 / 修复阶段的板块才进入下一步**。轮动、退潮的板块不选个股；用户持仓若属退潮板块 → Step 6 持仓评估时强制减仓。
+每个 `sector_rank` 输出已带 `breadth_pct`（板内上涨家数比例）和 `leader_*`。然后对 Top 5–10 个候选板块：
+
+```bash
+./scripts/data/sector_kline.sh BK1013 7      # 板块近 7 日 K，看持续性
+./scripts/data/sector_constituents.sh BK1013 # 板内成分股，过滤主板
+```
+
+按 `references/sector-screening.md` 的 6 步给每个板块定阶段：**主升 / 新启动 / 补涨 / 轮动 / 退潮 / 修复**。
+
+**只有处于主升 / 新启动 / 修复阶段的板块才进入 Step 7**。轮动、退潮板块不选个股；用户持仓若属退潮板块 → Step 6 强制减仓。
 
 ### Step 6 — 持仓评估（每只一遍）
 对 `holdings.md` 里每只持仓：
-1. 用 Step 5 的板块结论先定调：该股属于哪个板块、板块当前阶段
-2. 拉东方财富个股 K 线和分时（5/10/20/60 日均线 + 最新成交量）
-3. 拉巨潮最新公告（近 30 日）+ 东财 F10 财报数据
-4. 按 `references/playbooks.md`「持仓评估清单」过 6 项：
-   - 板块阶段：主升保持持有 / 退潮强制减仓
-   - 趋势是否破坏？（60 日线、20 日线、关键平台）
-   - 是否触发三段式卖点？（强一致日 / 第一次放量震荡 / 跌破 5 日线）
-   - 是否有公告催化或减持/问询/异动负面？
-   - 是否适合做 T 解套（**只做正T，绝不做倒T** — 电网设备 ETF 案例）
-   - 仓位是否需要再平衡？（单票 ≤ 15%、单板块 ≤ 25%）
 
-输出：每只一个状态（继续持有 / 减仓 X% / 做 T / 止损出局 / 暂不动观察），并写明触发条件。
+```bash
+./scripts/data/quote.sh 600519                 # 当日行情
+./scripts/data/kline.sh 600519 60 1d           # 60 日 K + 5/10/20/60 均线（脚本已计算）
+./scripts/data/announcements.sh 600519 30      # 近 30 日公告（含 risk/catalyst keyword 检测）
+./scripts/data/financials.sh 600519            # 最近 8 期财务
+```
+
+按 `references/playbooks.md`「持仓评估清单」过 6 项：
+- 板块阶段（用 Step 5 结论）：主升保持持有 / 退潮强制减仓
+- 趋势是否破坏？（kline 输出含 ma5/10/20/60，看价格 vs 均线）
+- 是否触发三段式卖点？（强一致日 / 第一次放量震荡 / 跌破 5 日线）
+- 是否有公告催化或减持/问询/异动负面？（announcements 输出 `risk_keywords_hit` 直接给标签）
+- 是否适合做 T 解套（**只做正T，绝不做倒T** — 电网设备 ETF 案例）
+- 仓位再平衡（单票 ≤ 15%、单板块 ≤ 25%）
+
+输出：每只一个状态（继续持有 / 减仓 X% / 做 T / 止损出局 / 暂不动观察）+ 触发条件。
 
 ### Step 7 — 候选池筛选（先板块、再票型）
 **一定按大盘级别决定该不该选短线票**。C 级盘短线候选数应为 0–1 个，B 级 1–3 个，A 级 3–5 个。
 
-**从 Step 5 选出的"主升 / 新启动 / 修复"板块内部**取候选，不要全市场扫描。每个板块阶段对应允许的票型（详见 `sector-screening.md` 末尾的"板块 → 个股映射表"）：
+**从 Step 5 选出的"主升 / 新启动 / 修复"板块内部**取候选，不要全市场扫描：
+
+```bash
+./scripts/data/sector_constituents.sh BK1013 | jq '
+  .data.stocks
+  | map(select(.code | test("^(600|601|603|605|000|001|002|003)")))
+  | sort_by(-.change_pct)[:5]'
+```
+
+每个板块阶段对应允许的票型（详见 `references/sector-screening.md` 末尾的"板块 → 个股映射表"）：
 
 | 板块阶段 | 允许的票型 |
 |---|---|
@@ -132,29 +172,31 @@ agent-browser skills get core
 | 补涨 | 错杀反弹（仓位极低） |
 
 中线慢牛 / 护盘衍生 / 逆市不跌票型不绑定板块阶段，可独立筛选：
-- **中线慢牛**：A 股主板 + 周线没坏 + 60 日线之上 + 财报扎实 + 低波动。直接打开东财行业板块涨幅榜里"白马蓝筹/食品饮料/家电/银行/医药/中特估"等防御板块，按个股 F10 数据筛
+- **中线慢牛**：从行业板块榜（食品饮料/家电/银行/医药/中特估等防御板块）取成分股，逐个 `financials.sh` + `kline.sh` 检查
 - **护盘衍生**：C 级盘或退潮期的避风港 — 银行 / 石油 / 电力 / 中字头 / 中特估
-- **逆市不跌**：大盘下跌中板块下跌但该股横盘不跌（缠论思路）。从今日跌幅靠后但成交温和的主板股里找
+- **逆市不跌**：从今日跌幅靠后但成交温和的主板股里找（缠论思路）
 
 每只候选都查：
-- 巨潮公告（30 日内）— 减持/质押/问询/异动 → 直接进回避池
-- 东财 F10 财务 — 营收 / 归母 / 扣非 / 毛利率 / 经营现金流
-- 板块位置（已在 Step 5 确认）
-- 5/20/60 日涨幅是否触发追高阈值
-- 同板块仓位（含持仓）累计是否会 > 25%
+```bash
+./scripts/data/announcements.sh <code> 30      # risk_keywords_hit 任一 true → 进回避池
+./scripts/data/financials.sh <code>            # 扣非 < 0 或同比恶化 → 降级
+./scripts/data/kline.sh <code> 60 1d           # change_5d_pct/20d/60d 触发追高阈值检查
+```
 
 ### Step 8 — 红线复核
 用 `references/scoring.md` 末尾的 Red-flag list 再过一遍候选池：
 - ST/*ST、退市预警、审计保留意见
-- 大股东减持公告、集中质押、商誉问询
-- 异常波动公告无基本面支撑
-- 连续一字板（散户没机会进 + 你也不该进）
-- 数据无法核验
+- 大股东减持公告（`announcements.risk_keywords_hit.shareholder_reduction = true`）
+- 异常波动公告无基本面支撑（`abnormal_volatility = true`）
+- 连续一字板（`limit_up_pool` 里 `break_count == 0` + 多日 `consecutive_limit_up`）
+- 数据脚本失败 + agent-browser 也拿不到 → 标"数据缺口"，**不要硬选**
 
 任何一条命中 → 移到回避池，并在报告里写明原因。
 
 ### Step 9 — 写报告
 按 `templates/report.md` 模板，落到 `~/AiCodingWorkspace/stock/reports/YYYY-MM-DD.md`。同时在对话里输出报告主体（结论先说 + 板块概览 + 持仓诊断 + 候选池表格 + 单票拆解的精简版），让用户当下能扫完。
+
+报告里**每个数字都标数据源**：`东财 22:14`、`巨潮 22:13`、`iTick 22:15 (fallback)` 等——直接从脚本输出的 `meta.source` + `meta.fetched_at` 拼出。
 
 如果该日期文件已存在（用户当晚多跑了一次），追加 `_v2` 后缀，不要覆盖。
 
@@ -168,28 +210,35 @@ agent-browser skills get core
 明日核心动作：[一句话]
 
 ## 大盘与情绪
-- 上证：白线 X / 黄线 Y / 成交量 Z 亿（vs 5日均量）
-- 资金：北向 +/-、主力净流入 +/-
-- 涨停 N / 跌停 M / 连板高度 / 首板晋级率
-- 判级：A / B / C；理由 ：…
-- 退潮期？：是 / 否；情绪冰点信号触发数 ：N/5
+- 上证：收 X (+/-Y%)、成交 Z 亿（vs 5日均量 ±W%）
+- 深证：收 X (+/-Y%)
+- 北向资金：沪 +/- 亿、深 +/- 亿
+- 涨停 N（主板 M）/ 跌停 P / 最高连板 Q / 首板晋级率 R%
+- 判级：A / B / C；理由：…
+- 退潮期？是 / 否；情绪冰点信号触发数：N/5
+
+## 板块概览
+| 板块 | 阶段 | 涨幅 | 板内宽度 | 连板高度 | 龙头 | 处置 |
+
+今日只在以下板块内选个股：[主升 X / 新启动 Y / 修复 Z]
+持仓属退潮板块 → 强制减仓：[P / Q]
+不碰：[R / S]
 
 ## 持仓诊断
-| 代码 | 名称 | 成本 | 现价 | 涨跌 | 趋势 | 信号 | 建议 | 触发条件 |
-（按 holdings.md 顺序）
+| 代码 | 名称 | 板块阶段 | 成本 | 现价 | 浮盈% | 趋势 | 三段式信号 | 公告风险 | 建议 | 触发条件 |
 
-## 明日候选池（按票型分组）
-### 票型 A — 中线慢牛
-| 代码 | 名称 | 板块 | 60日 | 财报亮点 | 公告催化 | 总分 | 试错仓位 | 加仓/止损条件 |
+## 明日候选池（按票型）
+### 中线慢牛
+| 代码 | 名称 | 板块 | 60日% | 财报亮点 | 公告催化 | 总分 | 试错仓位 | 加仓/止损条件 |
 
-### 票型 B — 老龙反抽
+### 老龙反抽 / 情绪龙头 / 均线启动 / …
 …
 
 ## 回避/谨慎名单
-- 代码 名称 — 原因（一句话）
+- 代码 名称 — 原因 + 数据来源（一句话）
 
 ## 数据缺口与置信度
-- 缺口：…
+- 缺口：…（哪个 endpoint 失败、走了哪个 fallback）
 - 置信度：高 / 中 / 低；原因：…
 
 ## 明日操作预案
@@ -205,7 +254,7 @@ agent-browser skills get core
 - 全程中文。
 - 用表格 > 长段落。
 - 「不入选」也要给理由 — 排除一只票的解释和入选一样有价值。
-- 时间点必须是当天日期 + 数据来源（"东财 22:14 截屏数据"），不要含糊"最新数据"。
+- 时间点必须是当天日期 + 数据来源（"东财 22:14"），不要含糊"最新数据"。
 - 不写"必涨""稳赚""目标价 X"。
 - 严肃尊重用户的纪律红线（连亏 2 笔停手、不追高、不做倒 T、不打首板除非 A 级盘）— 触发任何一条，必须在报告里**显式提醒**。
 
@@ -217,7 +266,10 @@ agent-browser skills get core
 
 ## 引用资源
 
-- `references/data-sources.md` — 各数据源访问入口、关键字段、agent-browser 操作要点（**只用原始页面，禁用 LLM 中介**）
+- `scripts/data/README.md` — **数据层架构**：统一 schema、adapter 协议、加新数据源步骤
+- `scripts/data/<name>.sh` — 12 个数据获取脚本（quote / kline / index_quote / sector_rank / sector_constituents / sector_kline / limit_up_pool / limit_down_pool / north_flow / dragon_tiger / announcements / financials）
+- `scripts/data/lib/` — adapter 实现（eastmoney 主源 / cninfo 公告源 / itick 官方 fallback / finnhub 占位）
+- `references/data-sources.md` — 各数据源职责矩阵 + 字段约定 + 故障降级策略
 - `references/sector-screening.md` — 板块筛选 6 步流程 + 板块阶段判定 + 板块 → 个股映射规则（**Step 5 的核心**）
 - `references/playbooks.md` — 大盘判级、票型识别、退潮期纪律、仓位公式、三段式卖法、持仓评估清单
 - `references/scoring.md` — 评分维度（按票型分别给分）+ 红线清单
