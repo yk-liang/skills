@@ -16,6 +16,9 @@
 
 set -euo pipefail
 
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/_python.sh"
+
 ak::_iso_now() {
   if date "+%Y-%m-%dT%H:%M:%S%z" >/dev/null 2>&1; then
     date "+%Y-%m-%dT%H:%M:%S%z" | sed 's/\([0-9][0-9]\)$/:\1/'
@@ -25,8 +28,16 @@ ak::_iso_now() {
 }
 
 ak::_check_python() {
-  if ! python3 -c "import akshare" 2>/dev/null; then
-    echo "akshare: python3 / akshare module not available; pip3 install akshare" >&2
+  local py; py=$(skill_python)
+  if ! "$py" -c "import akshare" 2>/dev/null; then
+    cat >&2 <<EOF
+akshare: NOT AVAILABLE (python at: $py)
+To enable this fallback (recommended for龙虎榜/北向/财务三表):
+  Option 1 (recommended — isolated venv):
+    cd $(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd) && ./scripts/setup.sh
+  Option 2 (manual, may pollute global env):
+    pip3 install akshare
+EOF
     return 1
   fi
 }
@@ -34,7 +45,8 @@ ak::_check_python() {
 ak::_run() {
   ak::_check_python || return 1
   local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  python3 "$script_dir/akshare_helper.py" "$@"
+  local py; py=$(skill_python)
+  "$py" "$script_dir/akshare_helper.py" "$@"
 }
 
 ak::caps() {

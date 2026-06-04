@@ -24,6 +24,11 @@ node_modules/
 *-workspace/
 iteration-*/
 
+# Skill-local python envs（每用户机器不同，不应进 git）
+.venv/
+.conda-env/
+.skill-env
+
 # 临时 / 个人运行时数据 — 任何 skill 都不应把真实交易数据 commit 上来
 **/portfolio/
 **/reports/

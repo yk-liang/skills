@@ -67,17 +67,27 @@ description: A股主板晚间复盘 + 明日预案 skill。夜间盘后调本目
 2. 读取 `references/experience-notes.md`，把任何用户已沉淀的硬规则套到本次。
 3. 确认当前交易日（用户机器本地时间，A股北京时间）。如果今天是周末或节假日且没有新公告，明确告诉用户"按上一个交易日 + 今晚公告"分析。
 
-### Step 2 — 验证数据脚本可用
+### Step 2 — 启动自检（依赖 + adapter 状态）
+
 ```bash
 cd ~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker
+./scripts/setup.sh --check > /tmp/skill_env.json
+jq '{target: .target_env, enabled: .enabled_adapters, disabled: .disabled_adapters}' /tmp/skill_env.json
+```
+
+把 `enabled_adapters` 和 `disabled_adapters` **写到报告"数据源状态"段**（见输出格式末尾），让用户知道本次哪些防线启用。
+
+如果 `akshare` 或 `playwright` 在 disabled 列表里，**报告里必须明确提醒**：
+- akshare 缺：dragon_tiger / north_flow / financials_full / earnings_forecast 会用 fallback 或报"数据缺口"
+- playwright 缺：sector_rank 在东财风控时无救场
+
+同时验证主源能跑：
+```bash
 ./scripts/data/quote.sh 600519 | jq '.meta.source, .data.price'
 ```
-应该看到 `"eastmoney"` + 一个数字。如果失败：
-1. 重试 1 次
-2. 仍失败 → 走 `SOURCE=itick`（需 `export ITICK_TOKEN=xxx`）
-3. iTick 也挂 → 才使用 agent-browser 兜底（先 `agent-browser skills get core` 拿命令），**且报告里必须标注"主源降级"**
+应该看到 source（可能是 eastmoney / 10jqka 任一，按 fallback chain 自动选）+ 一个数字。**不要硬编码 SOURCE=xxx** — dispatcher 会自动选最稳的。
 
-**禁止**：不要硬编码 `navigate`/`click` 等浏览器子命令；不要调任何 LLM 中介源（i问财等）。
+**禁止**：不要硬编码 `navigate`/`click` 等浏览器子命令；不要调任何 LLM 中介源（i问财等）；不要自动 pip install — 缺依赖时引导用户跑 `./scripts/setup.sh`。
 
 ### Step 3 — 大盘判级（A/B/C）
 

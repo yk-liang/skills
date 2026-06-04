@@ -17,28 +17,53 @@
 
 set -euo pipefail
 
-# Source eastmoney.sh 拿全部 URL 构建 + jq 解析；下面 override _get/_now_ms 走浏览器
 SCRIPT_DIR_PW="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR_PW/_python.sh"
+# Source eastmoney.sh 拿全部 URL 构建 + jq 解析；下面 override _get 走浏览器
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR_PW/eastmoney.sh"
 
-# Override em::_get → 改走 playwright；保留 retry 逻辑
+pw::_check_deps() {
+  local py; py=$(skill_python)
+  if ! "$py" -c "import playwright" 2>/dev/null; then
+    cat >&2 <<EOF
+playwright: NOT AVAILABLE (python at: $py)
+To enable (recommended for sector_rank fallback & 终极兜底):
+  Option 1 (recommended — isolated venv):
+    cd $(cd "$SCRIPT_DIR_PW/../.." && pwd) && ./scripts/setup.sh
+  Option 2 (manual):
+    pip3 install playwright && python3 -m playwright install chromium
+EOF
+    return 1
+  fi
+  # chromium 检查
+  if ! [ -d "$HOME/Library/Caches/ms-playwright" ] || \
+     ! ls "$HOME/Library/Caches/ms-playwright" 2>/dev/null | grep -qi chromium; then
+    echo "playwright: chromium NOT installed; run: $py -m playwright install chromium" >&2
+    return 1
+  fi
+}
+
+# Override em::_get → 改走 playwright
 em::_get() {
+  pw::_check_deps || return 1
   local url="$1"
-  local tries=0
   local resp
   local headed_arg=""
   [ -n "${PW_HEADED:-}" ] && headed_arg="--headed"
-  while [ $tries -lt 2 ]; do
-    if resp=$(python3 "$SCRIPT_DIR_PW/pw_fetch.py" $headed_arg "$url" 2>/dev/null); then
-      if [ -n "$resp" ]; then
-        printf '%s' "$resp"
-        return 0
-      fi
+  local py; py=$(skill_python)
+  if resp=$("$py" "$SCRIPT_DIR_PW/pw_fetch.py" $headed_arg "$url" 2>/dev/null); then
+    if [ -n "$resp" ]; then
+      printf '%s' "$resp"
+      return 0
     fi
-    tries=$((tries + 1))
-    sleep 1
-  done
+  fi
+  # retry 一次
+  sleep 1
+  if resp=$("$py" "$SCRIPT_DIR_PW/pw_fetch.py" $headed_arg "$url" 2>/dev/null); then
+    [ -n "$resp" ] && { printf '%s' "$resp"; return 0; }
+  fi
   echo "playwright: GET failed after retry: $url" >&2
   return 1
 }
