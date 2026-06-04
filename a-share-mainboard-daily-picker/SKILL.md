@@ -38,17 +38,23 @@ description: A股主板晚间复盘 + 明日预案 skill。夜间盘后调本目
 1. **永远不凭记忆选股**。每次运行必须调本目录下的数据脚本（`scripts/data/*.sh`）拉**当晚最新**数据。脚本失败则在报告里写"数据缺口 + 低置信度"，**绝不允许**编造、估算、或基于训练数据"补"上数字。
 2. **数据获取必须走脚本**（详见 `scripts/data/README.md` 与 `references/data-sources.md`）：
    - 所有行情、K线、板块、涨停、北向、龙虎榜、财务、公告全部调 `./scripts/data/<name>.sh` 取得**结构化 JSON**
-   - 默认 fallback chain：东方财富后台 JSON API（主）→ iTick（官方稳定 fallback，需 `ITICK_TOKEN`）→ agent-browser（最后兜底）
+   - 默认 fallback chain：东方财富 → 同花顺 → iTick（需 `ITICK_TOKEN`）→ agent-browser（最后兜底）
    - 脚本退出非零 → 重试 1 次 → 仍失败才走 agent-browser，**且必须在报告里标注降级**
    - **❌ 禁止使用任何 LLM 中介工具**：同花顺 i问财、AI 选股助手、ChatGPT 插件等——它们会让真值被改写
    - 拒绝来源：股吧、公众号小作文、短视频截图、群聊、未署名"市场传闻"
-3. **股票池白名单**：默认 A股主板，按代码前缀过滤；用户明确说"看创业板/科创板"才放开。
-4. **板块先行**：选个股**之前**必须先做板块筛选（见 `references/sector-screening.md`）。任何候选都必须能回答"属于哪个板块、板块当前是什么阶段"。板块不在主升/新启动/修复中，**不选个股**。
-5. **不追高的硬阈值**：5D 涨幅 > 20% 或 20D > 35% 或 60D > 60% → 价格位置维度封顶 8 分，并标注"追高风险"。除非有用户**明确要求**做加速。
-6. **用观察池语言**：用「候选池 / 观察池 / 回避池」，禁止"必涨""稳赚""推荐买入"。
-7. **每只入选必须给账户适配建议**：试错仓位（默认 ≤ 5–8% 单票观察仓）、加仓条件、止损/失效条件。
-8. **票型必须明确**。每只候选必须归到某个票型（见 `references/playbooks.md`），不同票型用不同评分逻辑和不同仓位上限。
-9. **发现红旗（Red-flag override）直接降级到回避**，不论分数多高。详见 `references/scoring.md` 末尾。
+3. **事实数据 >> 平台解读**（详见 `references/experience-notes.md`「数据 vs 解读纪律」）：
+   - 同花顺/东财的 `reason_type`（涨停原因）、"诊股"、AI 推荐、研报观点、投顾文章——全部是**事后归因**或**LLM 中介**类二手解读
+   - 这些字段可在报告里**列出作参考**，但**不能作为入选/回避的判断依据**
+   - 推论必须来自一手数据：量价、板块共振、K 线结构、巨潮公告原文、财务、龙虎榜席位、北向资金
+   - 反面措辞示例：❌"该股属于 CPO 主线（reason_type 标注）"；✅"光纤光缆主线（亨通/长飞/中天 3 只主板同向 + 亨通 26Q1 扣非 +108%）"
+4. **股票池白名单**：默认 A股主板，按代码前缀过滤；用户明确说"看创业板/科创板"才放开。
+5. **板块先行**：选个股**之前**必须先做板块筛选（见 `references/sector-screening.md`）。任何候选都必须能回答"属于哪个板块、板块当前是什么阶段"。板块不在主升/新启动/修复中，**不选个股**。
+6. **不追高的硬阈值**：5D 涨幅 > 20% 或 20D > 35% 或 60D > 60% → 价格位置维度封顶 8 分，并标注"追高风险"。除非有用户**明确要求**做加速。
+7. **用观察池语言**：用「候选池 / 观察池 / 回避池」，禁止"必涨""稳赚""推荐买入"。
+8. **每只入选必须给账户适配建议**：试错仓位（默认 ≤ 5–8% 单票观察仓）、加仓条件、止损/失效条件。
+9. **票型必须明确**。每只候选必须归到某个票型（见 `references/playbooks.md`），不同票型用不同评分逻辑和不同仓位上限。
+10. **发现红旗（Red-flag override）直接降级到回避**，不论分数多高。详见 `references/scoring.md` 末尾。
+11. **连板字段必须看 `consecutive_limit_up`，不是 `streak_height` 或 `ladder_label` 里的数字**——"7天5板"的真连板可能是 null（含断板），detail 见 `scripts/data/README.md` 连板字段语义表。
 
 ## Workflow（夜间执行 9 步）
 
@@ -96,18 +102,21 @@ cd ~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker
 ### Step 4 — 情绪温度
 
 ```bash
-./scripts/data/limit_up_pool.sh   | tee /tmp/lup.json | jq '.data | {total, mainboard_count, max_consecutive, ladder_3plus_count}'
+./scripts/data/limit_up_pool.sh   | tee /tmp/lup.json | jq '.data | {total, mainboard_count, max_consecutive, max_streak_height, pure_streak_3plus_count}'
 ./scripts/data/limit_down_pool.sh | tee /tmp/ldp.json | jq '.data.total'
 ./scripts/data/dragon_tiger.sh    > /tmp/dt.json
 ```
 
-提取：
+提取（注意字段语义见 `scripts/data/README.md` 连板字段语义表）：
 - 涨停家数（剔除 ST）：`jq '.data.stocks | map(select(.name | contains("ST") | not)) | length' /tmp/lup.json`
 - 主板涨停家数：`.data.mainboard_count`
-- 最高连板：`.data.max_consecutive`
-- 连板 ≥ 3 票数：`.data.ladder_3plus_count`
+- **最高真连板**：`.data.max_consecutive`（这是"几连板"的真实数字，例如 3 = 3 连板）
+- **最高炒作高度**：`.data.max_streak_height`（含断板，"7 天 5 板"算 5）
+- 真连板 ≥ 3 票数：`.data.pure_streak_3plus_count`
 - 跌停家数：`/tmp/ldp.json` 取 `.data.total`
-- 首板晋级率：今天 ladder_count==2 数量 ÷ 昨天 ladder_count==1 数量；< 30% 视为退潮
+- 首板晋级率：今天 `consecutive_limit_up == 2` 数量 ÷ 昨天 `consecutive_limit_up == 1` 数量；< 30% 视为退潮
+
+⚠️ **绝不要把 `streak_height`、`ladder_label` 里的数字（如"7天5板"的 5）当作连板数**。判断"打不打连板"用 `consecutive_limit_up`。
 
 按 `references/playbooks.md` 的「退潮期 / 情绪冰点」章节判断今天是否退潮、是否冰点临近。
 

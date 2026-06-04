@@ -316,8 +316,9 @@ ths::limit_up_pool() {
       mainboard_count: ([.stocks[] | select(
         (.code | startswith("600") or startswith("601") or startswith("603") or startswith("605") or startswith("000") or startswith("001") or startswith("002") or startswith("003"))
       )] | length),
-      max_pure_consecutive: ([.stocks[].consecutive_limit_up // 0] | max // 0),
-      max_streak_height: ([.stocks[].streak_height // 0] | max // 0)
+      max_consecutive: ([.stocks[].consecutive_limit_up // 0] | max // 0),
+      max_streak_height: ([.stocks[].streak_height // 0] | max // 0),
+      pure_streak_3plus_count: ([.stocks[] | select((.consecutive_limit_up // 0) >= 3)] | length)
     }')
   ths::wrap_meta "limit_up_pool" "" "$data"
 }
