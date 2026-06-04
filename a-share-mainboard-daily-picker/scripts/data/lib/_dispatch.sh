@@ -10,15 +10,20 @@
 set -euo pipefail
 
 # Endpoint → 优先级链。前面的优先用。
-# A 股专属信号没有 itick fallback（itick 不支持），最后才走 browser。
-# A 股公告优先 cninfo，eastmoney 没实现公告。
+# 设计原则：
+#   - 同花顺（10jqka）作为东财失败后的第一道防线（无 key、稳定、和东财后端独立）
+#   - iTick 只在两者都挂时启用（需 ITICK_TOKEN，免费 5 req/min）
+#   - A 股专属衍生信号（板块榜/北向/龙虎榜/财务）只能东财，无 fallback；agent 失败时按 SKILL.md 走 browser 兜底
+#   - 涨停池东财和同花顺都有；首选同花顺（中文 high_days 标签 + 涨停原因更直观）
 dispatch::_chain_for() {
   case "$1" in
-    quote|kline|index_quote|stock_symbols) echo "eastmoney itick" ;;
+    quote|kline|index_quote)               echo "eastmoney 10jqka itick" ;;
+    stock_symbols)                         echo "eastmoney itick" ;;
     financials)                            echo "eastmoney" ;;
     announcements)                         echo "cninfo" ;;
     sector_rank|sector_constituents|sector_kline) echo "eastmoney" ;;
-    limit_up_pool|limit_down_pool)         echo "eastmoney" ;;
+    limit_up_pool)                         echo "10jqka eastmoney" ;;
+    limit_down_pool)                       echo "eastmoney" ;;
     north_flow|dragon_tiger)               echo "eastmoney" ;;
     *)                                     echo "eastmoney" ;;
   esac
@@ -29,6 +34,7 @@ dispatch::_prefix_for() {
   case "$1" in
     eastmoney) echo "em" ;;
     cninfo)    echo "cn" ;;
+    10jqka)    echo "ths" ;;
     itick)     echo "itick" ;;
     finnhub)   echo "fh" ;;
     *)         echo "" ;;

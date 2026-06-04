@@ -13,9 +13,10 @@ skill 的所有数据获取都通过本目录的脚本进行。**SKILL 主体不
 scripts/data/
 ├── README.md                # 本文档（设计 + adapter 协议 + 加新 adapter 步骤）
 ├── lib/
-│   ├── eastmoney.sh         # 东方财富 adapter（A 股主力）
-│   ├── cninfo.sh            # 巨潮资讯 adapter（公告）
-│   ├── 10jqka.sh            # 同花顺 adapter（交叉验证）
+│   ├── eastmoney.sh         # 东方财富 adapter（A 股主力，全字段覆盖）
+│   ├── 10jqka.sh            # 同花顺 adapter（东财风控时的二级防线；涨停池中文 high_days 比东财更直观）
+│   ├── cninfo.sh            # 巨潮资讯 adapter（公告专用）
+│   ├── itick.sh             # iTick adapter（官方付费源，需 ITICK_TOKEN；5 req/min 仅做最后兜底）
 │   └── finnhub.sh           # finnhub adapter（占位 — 将来给美股/港股用，A 股不走这条）
 ├── quote.sh <code>                      # 实时行情
 ├── kline.sh <code> [days] [period]      # K 线（含 5/10/20/60 均线计算）
@@ -148,6 +149,18 @@ cd ~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker
 ./scripts/data/sector_rank.sh concept | jq '.data.sectors[:5]'   # 概念板块前 5
 ```
 
+## Fallback chain（dispatcher 自动）
+
+| Endpoint | 默认链 | 备注 |
+|---|---|---|
+| `quote` / `kline` / `index_quote` | **eastmoney → 10jqka → itick** | 东财 push2 风控时自动切同花顺；都挂才走 itick |
+| `limit_up_pool` | **10jqka → eastmoney** | 同花顺优先（中文 ladder_label 更直观）|
+| `sector_rank` / `sector_constituents` / `sector_kline` | eastmoney | 同花顺/itick 都没有，仅东财；失败需 agent-browser 兜底 |
+| `north_flow` / `dragon_tiger` / `limit_down_pool` / `financials` | eastmoney | A 股专属，无 API fallback |
+| `announcements` | cninfo | 巨潮是唯一官方源 |
+
+环境变量 `SOURCE=xxx` 可强制单源（诊断/测试用）：`SOURCE=10jqka ./scripts/data/quote.sh 600519`。
+
 ## 已知限制 / 风控注意
 
 东财 `/api/qt/clist/get` 这条路径（sector_rank、sector_constituents 用）**容易触发 IP 级反爬**——表现为持续返回空响应。可能原因：
@@ -157,7 +170,26 @@ cd ~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker
 **当 sector_rank / sector_constituents 持续失败时**：
 
 1. 等待 5–30 分钟自然解封
-2. 切 `SOURCE=itick`（注意 iTick 不支持 sector）→ 失败
+2. 切 `SOURCE=10jqka` → 失败（同花顺没有等价接口）
 3. → **走 agent-browser 兜底**（按 SKILL.md Step 5 流程，agent 打开东财板块页 `http://quote.eastmoney.com/center/boardlist.html` 抽 DOM）
 
-`/api/qt/stock/get`（quote、index_quote 用）和 `/api/qt/stock/kline/get`（kline 用）**未见风控**。`push2ex.eastmoney.com`（涨停板池）和 `datacenter.eastmoney.com`（财务、龙虎榜）也独立稳定。
+`/api/qt/stock/get`（quote、index_quote 用）和 `/api/qt/stock/kline/get`（kline 用）**也可能间歇 503**——dispatcher 会自动 fallback 到同花顺。`push2ex.eastmoney.com`（涨停板池）和 `datacenter.eastmoney.com`（财务、龙虎榜）历来独立稳定。
+
+## 连板字段语义（必读 — 这是历史踩过的坑）
+
+涨停池里的连板相关字段含义微妙，**agent 必须读懂下面这张表，避免误把"窗口数"当"连板数"**：
+
+| 字段 | 含义 | 例子 |
+|---|---|---|
+| `ladder_label` | 同花顺中文标签（权威） | "首板" / "2连板" / "3天3板" / "7天5板" |
+| `consecutive_limit_up` | **真连板数**（严格意义）| "首板"=1, "3连板"=3, "3天3板"=3, **"7天5板"=null**（含断板）|
+| `streak_height` | 市场认知的"高度"（炒作） | "7天5板"=5, "3天3板"=3 — N 是窗口内涨停**次数**（不必连续）|
+| `is_pure_streak` | 是否纯连板（无断板）| "7天5板"=false, "3天3板"=true |
+| `today_intraday_breaks` | 今日盘中开板次数（intraday）| 与连板天数无关 |
+| `limit_window_days` / `limits_in_window`（东财专有）| zttj.days / zttj.ct | 窗口跨度 + 窗口内涨停次数 |
+
+**历史教训（2026-06-03 报告）**：
+- 利仁 001259：lbc=1 / 老 `ladder_count=9` → agent 误读为 "9 板"（实际首板）
+- 红星 600367：lbc=3 / 老 `ladder_count=5` → agent 误读为 "5 连板"（实际 3连板 + 7天5板）
+
+**铁律**：判断"连板梯队"用 `consecutive_limit_up`，判断"题材热度"用 `streak_height`。两者经常不同。

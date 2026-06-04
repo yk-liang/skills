@@ -358,6 +358,13 @@ em::limit_up_pool() {
   local url="https://push2ex.eastmoney.com/getTopicZTPool?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.ztzt&Pageindex=0&pagesize=300&sort=fbt%3Aasc&date=${date}&_=$(em::_now_ms)"
   local resp; resp=$(em::_get "$url") || return 1
 
+  # 字段含义（必读 — 之前 agent 把 ladder_count 误读为连板数导致严重判断错误）：
+  #   consecutive_limit_up = lbc = 当前**真连板**天数（首板=1, 二连=2, ...）  ← 用这个
+  #   today_intraday_breaks = zbc = 今日盘中涨停被打开的次数（不影响连板天数）
+  #   limit_window_days = zttj.days = 近 N 个交易日的窗口跨度
+  #   limits_in_window = zttj.ct = 该窗口内涨停过几次（不一定连续！）
+  # 反面教材：利仁 001259（2026-06-03）lbc=1 是首板，但 ladder_days=18 ladder_count=9
+  # 老版本字段命名让 agent 误读为"9 板"，结果是 18 天里涨停 9 次（断断续续），当前是首板换手板
   local data; data=$(printf '%s' "$resp" | jq '
     .data | {
       query_date: (.qdate | tostring),
@@ -375,17 +382,34 @@ em::limit_up_pool() {
         first_limit_time: .fbt,
         last_limit_time: .lbt,
         limit_funds_yuan: .fund,
-        break_count: .zbc,
+        today_intraday_breaks: .zbc,
         industry: .hybk,
-        ladder_days: (.zttj.days // null),
-        ladder_count: (.zttj.ct // null)
+        limit_window_days: (.zttj.days // null),
+        limits_in_window: (.zttj.ct // null)
+      } | . + {
+        is_first_board: (.consecutive_limit_up == 1),
+        is_pure_streak: ((.limits_in_window // 0) == .consecutive_limit_up),
+        ladder_label: (
+          if .consecutive_limit_up == 1 then "首板"
+          elif .consecutive_limit_up == 2 then "2连板"
+          elif .consecutive_limit_up == 3 then "3连板"
+          elif .consecutive_limit_up >= 4 then "\(.consecutive_limit_up)连板"
+          else "未知"
+          end
+        ),
+        window_summary: (
+          if (.limits_in_window // 0) > .consecutive_limit_up and (.limit_window_days // 0) > 0 then
+            "\(.limit_window_days)天\(.limits_in_window)板（含断板）"
+          else null
+          end
+        )
       }))
     } | . + {
       mainboard_count: ([.stocks[] | select(
         (.code | startswith("600") or startswith("601") or startswith("603") or startswith("605") or startswith("000") or startswith("001") or startswith("002") or startswith("003"))
       )] | length),
       max_consecutive: ([.stocks[].consecutive_limit_up] | max // 0),
-      ladder_3plus_count: ([.stocks[] | select(.consecutive_limit_up >= 3)] | length)
+      pure_streak_3plus_count: ([.stocks[] | select(.consecutive_limit_up >= 3)] | length)
     }')
   em::wrap_meta "limit_up_pool" "" "$data"
 }
