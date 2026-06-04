@@ -30,9 +30,10 @@ em::_iso_now() {
 
 em::_get() {
   # GET with multi-host fallback for push2.eastmoney.com endpoints
-  # 东财 push2 集群有多个数字前缀镜像（1.push2 ... 99.push2），原始 push2 偶尔反爬空回应
+  # 东财 push2 集群有多个数字前缀镜像（1.push2 ... 99.push2）；原始 push2 偶尔反爬空回应
+  # 策略：每个 host 只 1 次 5s timeout（最差 4 hosts * 5s = 20s 总感知）
+  #       而非旧版 2 retry × 15s = 最差 120s — 风控时让 dispatcher 尽快走 fallback
   local url="$1"
-  local tries=0
   local resp
   local hosts=("push2.eastmoney.com" "88.push2.eastmoney.com" "29.push2.eastmoney.com" "63.push2.eastmoney.com")
   local hosts_his=("push2his.eastmoney.com" "31.push2his.eastmoney.com" "60.push2his.eastmoney.com")
@@ -52,17 +53,12 @@ em::_get() {
     if [ "$host" != "__nohost__" ]; then
       target_url=$(printf '%s' "$url" | sed -E "s|https://[0-9]*\.?push2(his)?\.eastmoney\.com|https://${host}|")
     fi
-    tries=0
-    while [ $tries -lt 2 ]; do
-      if resp=$(curl -fsSL --max-time 15 -H "User-Agent: $EM_UA" -H "Referer: https://quote.eastmoney.com/" "$target_url" 2>/dev/null); then
-        if [ -n "$resp" ]; then
-          printf '%s' "$resp"
-          return 0
-        fi
+    if resp=$(curl -fsSL --max-time 5 -H "User-Agent: $EM_UA" -H "Referer: https://quote.eastmoney.com/" "$target_url" 2>/dev/null); then
+      if [ -n "$resp" ]; then
+        printf '%s' "$resp"
+        return 0
       fi
-      tries=$((tries + 1))
-      sleep 1
-    done
+    fi
   done
   echo "eastmoney: GET failed across all hosts: $url" >&2
   return 1
@@ -113,7 +109,7 @@ em::wrap_meta() {
 }
 
 em::caps() {
-  echo "quote kline index_quote sector_rank sector_constituents sector_kline limit_up_pool limit_down_pool north_flow dragon_tiger announcements financials"
+  echo "quote kline index_quote sector_rank sector_constituents sector_kline limit_up_pool limit_down_pool north_flow dragon_tiger announcements financials individual_info"
 }
 
 # ---------- 业务函数 ----------
@@ -482,6 +478,33 @@ em::announcements() {
   # 占位 — 巨潮接口在 cninfo.sh 实现
   echo "eastmoney: announcements not implemented; use SOURCE=cninfo" >&2
   return 1
+}
+
+em::individual_info() {
+  # 个股基础信息：通过 push2 stock/get 扩展字段拿
+  # 实测字段（茅台 2026-06）：
+  #   f57=代码 f58=名称 f43=现价×100 f116=流通市值(元) f117=总市值(元)
+  #   f84=总股本 f85=流通股 f127=二级行业(字符串如"白酒Ⅱ")
+  # listing_date 字段未在 push2 stock/get 暴露 → 留 null，akshare 主源已有
+  local code="$1"
+  local secid; secid=$(em::secid "$code")
+  local fields="f57,f58,f43,f116,f117,f84,f85,f127"
+  local url="https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=${fields}&_=$(em::_now_ms)"
+  local resp; resp=$(em::_get "$url") || return 1
+
+  local data; data=$(printf '%s' "$resp" | jq --arg code "$code" '
+    .data | {
+      symbol: $code,
+      name: .f58,
+      latest_price: (if .f43 then .f43 / 100 else null end),
+      industry: .f127,
+      listing_date: null,
+      total_shares: .f84,
+      floating_shares: .f85,
+      total_mcap_yuan: .f117,
+      floating_mcap_yuan: .f116
+    }')
+  em::wrap_meta "individual_info" "$code" "$data"
 }
 
 em::financials() {

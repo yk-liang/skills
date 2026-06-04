@@ -14,10 +14,14 @@ scripts/data/
 ├── README.md                # 本文档（设计 + adapter 协议 + 加新 adapter 步骤）
 ├── lib/
 │   ├── eastmoney.sh         # 东方财富 adapter（A 股主力，全字段覆盖）
-│   ├── 10jqka.sh            # 同花顺 adapter（东财风控时的二级防线；涨停池中文 high_days 比东财更直观）
+│   ├── 10jqka.sh            # 同花顺 adapter（东财风控时的一级 fallback；涨停池中文 high_days 比东财更直观）
+│   ├── akshare.sh           # AKShare Python 库 adapter（多源融合）：龙虎榜/北向/财务三表/业绩预告 强力救场
+│   ├── akshare_helper.py    # akshare adapter 的 Python 实现
+│   ├── playwright.sh        # Playwright 浏览器内 fetch（绕过 IP 风控的终极兜底；复用 eastmoney URL+解析）
+│   ├── pw_fetch.py          # playwright adapter 的 Python helper（page.request.fetch 绕 CORS）
 │   ├── cninfo.sh            # 巨潮资讯 adapter（公告专用）
-│   ├── itick.sh             # iTick adapter（官方付费源，需 ITICK_TOKEN；5 req/min 仅做最后兜底）
-│   └── finnhub.sh           # finnhub adapter（占位 — 将来给美股/港股用，A 股不走这条）
+│   ├── itick.sh             # iTick adapter（官方付费源，需 ITICK_TOKEN；5 req/min）
+│   └── finnhub.sh           # finnhub adapter（占位 — 将来给美股/港股用）
 ├── quote.sh <code>                      # 实时行情
 ├── kline.sh <code> [days] [period]      # K 线（含 5/10/20/60 均线计算）
 ├── index_quote.sh <index>               # 指数行情（上证 / 深证 / 创业板）
@@ -153,13 +157,19 @@ cd ~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker
 
 | Endpoint | 默认链 | 备注 |
 |---|---|---|
-| `quote` / `kline` / `index_quote` | **eastmoney → 10jqka → itick** | 东财 push2 风控时自动切同花顺；都挂才走 itick |
-| `limit_up_pool` | **10jqka → eastmoney** | 同花顺优先（中文 ladder_label 更直观）|
-| `sector_rank` / `sector_constituents` / `sector_kline` | eastmoney | 同花顺/itick 都没有，仅东财；失败需 agent-browser 兜底 |
-| `north_flow` / `dragon_tiger` / `limit_down_pool` / `financials` | eastmoney | A 股专属，无 API fallback |
-| `announcements` | cninfo | 巨潮是唯一官方源 |
+| `quote` / `kline` / `index_quote` | **eastmoney → 10jqka → akshare → itick → playwright** | 5 道防线，东财风控时 1-2s 自动切 10jqka |
+| `limit_up_pool` | **10jqka → eastmoney → akshare** | 10jqka 优先（中文 ladder_label 更直观）|
+| `sector_rank` / `sector_constituents` / `sector_kline` | **eastmoney → playwright** | akshare/10jqka 都没有等价接口；playwright 浏览器内 fetch 是唯一救场 |
+| `north_flow` / `dragon_tiger` | **akshare → eastmoney** | akshare 用不同 URL 路径，比东财 datacenter 稳得多 |
+| `financials` | **eastmoney → akshare** | akshare 提供完整三表（akshare 是 `financials_full` endpoint）|
+| `financials_full` / `earnings_forecast` | **akshare** | 仅 akshare 实现 |
+| `individual_info` | **akshare → eastmoney → playwright** | 三级防线 |
+| `limit_down_pool` | **eastmoney** | 单源，失败需 playwright 兜底（agent 手动 SOURCE=playwright）|
+| `announcements` | **cninfo** | 巨潮是唯一官方源 |
 
-环境变量 `SOURCE=xxx` 可强制单源（诊断/测试用）：`SOURCE=10jqka ./scripts/data/quote.sh 600519`。
+环境变量 `SOURCE=xxx` 可强制单源（诊断/测试用）：`SOURCE=10jqka ./scripts/data/quote.sh 600519`
+
+环境变量 `PW_HEADED=1` 让 playwright 浏览器可见（人工验证用）。
 
 ## 已知限制 / 风控注意
 

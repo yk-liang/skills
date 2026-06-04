@@ -11,20 +11,24 @@ set -euo pipefail
 
 # Endpoint → 优先级链。前面的优先用。
 # 设计原则：
-#   - 同花顺（10jqka）作为东财失败后的第一道防线（无 key、稳定、和东财后端独立）
-#   - iTick 只在两者都挂时启用（需 ITICK_TOKEN，免费 5 req/min）
-#   - A 股专属衍生信号（板块榜/北向/龙虎榜/财务）只能东财，无 fallback；agent 失败时按 SKILL.md 走 browser 兜底
-#   - 涨停池东财和同花顺都有；首选同花顺（中文 high_days 标签 + 涨停原因更直观）
+#   - 主源（eastmoney/10jqka）curl 快，无依赖，作首选
+#   - akshare 用 Python，启动 ~0.5s 但内部 fallback 多源，作二线防线（尤其救场龙虎榜/北向）
+#   - itick 需 ITICK_TOKEN + 5 req/min，作末线（仅 quote/kline/index）
+#   - playwright 抓真实页面，最慢但最稳，专攻 sector_rank（其他源全军覆没）
 dispatch::_chain_for() {
   case "$1" in
-    quote|kline|index_quote)               echo "eastmoney 10jqka itick" ;;
+    quote|kline|index_quote)               echo "eastmoney 10jqka akshare itick playwright" ;;
     stock_symbols)                         echo "eastmoney itick" ;;
-    financials)                            echo "eastmoney" ;;
+    financials)                            echo "eastmoney akshare" ;;
+    financials_full)                       echo "akshare" ;;
+    earnings_forecast)                     echo "akshare" ;;
+    individual_info)                       echo "akshare eastmoney playwright" ;;
     announcements)                         echo "cninfo" ;;
-    sector_rank|sector_constituents|sector_kline) echo "eastmoney" ;;
-    limit_up_pool)                         echo "10jqka eastmoney" ;;
+    sector_rank|sector_constituents|sector_kline) echo "eastmoney playwright" ;;
+    limit_up_pool)                         echo "10jqka eastmoney akshare" ;;
     limit_down_pool)                       echo "eastmoney" ;;
-    north_flow|dragon_tiger)               echo "eastmoney" ;;
+    north_flow)                            echo "akshare eastmoney" ;;
+    dragon_tiger)                          echo "akshare eastmoney" ;;
     *)                                     echo "eastmoney" ;;
   esac
 }
@@ -32,12 +36,14 @@ dispatch::_chain_for() {
 # adapter 名 → 函数前缀
 dispatch::_prefix_for() {
   case "$1" in
-    eastmoney) echo "em" ;;
-    cninfo)    echo "cn" ;;
-    10jqka)    echo "ths" ;;
-    itick)     echo "itick" ;;
-    finnhub)   echo "fh" ;;
-    *)         echo "" ;;
+    eastmoney)  echo "em" ;;
+    cninfo)     echo "cn" ;;
+    10jqka)     echo "ths" ;;
+    akshare)    echo "ak" ;;
+    playwright) echo "pw" ;;
+    itick)      echo "itick" ;;
+    finnhub)    echo "fh" ;;
+    *)          echo "" ;;
   esac
 }
 
