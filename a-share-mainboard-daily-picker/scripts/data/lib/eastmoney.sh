@@ -415,6 +415,16 @@ em::limit_down_pool() {
   local url="https://push2ex.eastmoney.com/getTopicDTPool?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.dtzt&Pageindex=0&pagesize=300&sort=fund%3Aasc&date=${date}&_=$(em::_now_ms)"
   local resp; resp=$(em::_get "$url") || return 1
 
+  # 检测 endpoint 整体故障：rc != 0 或 data 为 null
+  # 之前的 bug：data=null 时 .pool // [] 退化为 total=0 假数据，让 agent 以为"今天没跌停"
+  # 反面教材：2026-06-03 实际 11 只跌停（祖名/华康/永泰运等），adapter 报 0 → 报告完全错
+  local rc; rc=$(printf '%s' "$resp" | jq -r '.rc // -1')
+  local has_data; has_data=$(printf '%s' "$resp" | jq -r '.data | type')
+  if [ "$rc" != "0" ] || [ "$has_data" = "null" ]; then
+    echo "eastmoney: limit_down_pool API returned rc=$rc data=$has_data (endpoint 可能挂了)" >&2
+    return 1
+  fi
+
   local data; data=$(printf '%s' "$resp" | jq '
     .data | {
       query_date: (.qdate | tostring),

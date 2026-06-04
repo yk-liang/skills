@@ -26,7 +26,8 @@ dispatch::_chain_for() {
     announcements)                         echo "cninfo" ;;
     sector_rank|sector_constituents|sector_kline) echo "eastmoney playwright" ;;
     limit_up_pool)                         echo "10jqka eastmoney akshare" ;;
-    limit_down_pool)                       echo "eastmoney" ;;
+    limit_down_pool)                       echo "akshare eastmoney playwright" ;;
+    broken_up_pool)                        echo "akshare" ;;
     north_flow)                            echo "akshare eastmoney" ;;
     dragon_tiger)                          echo "akshare eastmoney" ;;
     *)                                     echo "eastmoney" ;;

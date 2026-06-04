@@ -50,7 +50,7 @@ ak::_run() {
 }
 
 ak::caps() {
-  echo "kline dragon_tiger north_flow financials_full earnings_forecast individual_info limit_up_pool"
+  echo "kline dragon_tiger north_flow financials_full earnings_forecast individual_info limit_up_pool limit_down_pool broken_up_pool"
 }
 
 ak::kline()             { ak::_run kline "$@"; }
@@ -60,6 +60,8 @@ ak::financials_full()   { ak::_run financials_full "$@"; }
 ak::earnings_forecast() { ak::_run earnings_forecast "$@"; }
 ak::individual_info()   { ak::_run individual_info "$@"; }
 ak::limit_up_pool()     { ak::_run limit_up_pool "$@"; }
+ak::limit_down_pool()   { ak::_run limit_down_pool "$@"; }
+ak::broken_up_pool()    { ak::_run broken_up_pool "$@"; }
 
 # 不实现的（让 dispatcher fall through）
 ak::quote()                { echo "akshare: quote not implemented (use eastmoney/10jqka)" >&2; return 1; }
@@ -67,6 +69,6 @@ ak::index_quote()          { echo "akshare: index_quote not implemented (use eas
 ak::sector_rank()          { echo "akshare: sector_rank uses same push2 path, also blocked; use playwright" >&2; return 1; }
 ak::sector_constituents()  { echo "akshare: sector_constituents same as above" >&2; return 1; }
 ak::sector_kline()         { echo "akshare: sector_kline not implemented" >&2; return 1; }
-ak::limit_down_pool()      { echo "akshare: limit_down_pool not implemented" >&2; return 1; }
+# limit_down_pool 已在上方实现（救东财 getTopicDTPool 假死 bug）
 ak::announcements()        { echo "akshare: announcements not implemented; use cninfo" >&2; return 1; }
 ak::financials()           { echo "akshare: financials → use financials_full or eastmoney" >&2; return 1; }

@@ -342,6 +342,110 @@ def individual_info(args):
     print(json.dumps(wrap_meta("individual_info", code, data), ensure_ascii=False))
 
 
+def _safe_num(v, cast=float, default=None):
+    """安全数值转换：处理 pandas NaN / 空字符串 / None / 0 等各种值"""
+    try:
+        if v is None or v == "" or (isinstance(v, float) and v != v):  # NaN check
+            return default
+        return cast(v)
+    except (ValueError, TypeError):
+        return default
+
+
+def broken_up_pool(args):
+    """炸板池 — 今日触及涨停后被打开（市场情绪关键指标，同花顺 app 显示的"涨停打开"）"""
+    import akshare as ak
+    date = args[0] if args else _trading_date().replace("-", "")
+    df = None
+    last_err = None
+    for attempt in range(2):
+        try:
+            df = ak.stock_zt_pool_zbgc_em(date=date)
+            break
+        except Exception as e:
+            last_err = e
+            time.sleep(2)
+    if df is None:
+        _fail(f"broken_up_pool failed after retry: {last_err}")
+
+    if df is None:
+        df = []
+    stocks = []
+    for _, row in df.iterrows() if hasattr(df, 'iterrows') else []:
+        stocks.append({
+            "code": str(row.get("代码", "")),
+            "name": str(row.get("名称", "")),
+            "price": _safe_num(row.get("最新价"), float),
+            "limit_up_price": _safe_num(row.get("涨停价"), float),
+            "change_pct": _safe_num(row.get("涨跌幅"), float),
+            "turnover_yuan": _safe_num(row.get("成交额"), float),
+            "circulating_mcap_yuan": _safe_num(row.get("流通市值"), float),
+            "total_mcap_yuan": _safe_num(row.get("总市值"), float),
+            "turnover_rate_pct": _safe_num(row.get("换手率"), float),
+            "speed_pct": _safe_num(row.get("涨速"), float),
+            "first_limit_up_time": str(row.get("首次封板时间", "") or ""),
+            "intraday_break_count": _safe_num(row.get("炸板次数"), int),
+            "amplitude_pct": _safe_num(row.get("振幅"), float),
+            "industry": str(row.get("所属行业", "") or ""),
+            "window_stat": str(row.get("涨停统计", "") or ""),
+        })
+    mainboard_prefixes = ("600", "601", "603", "605", "000", "001", "002", "003")
+    data = {
+        "query_date": date,
+        "total": len(stocks),
+        "stocks": stocks,
+        "mainboard_count": len([s for s in stocks if s["code"].startswith(mainboard_prefixes)]),
+        "high_break_count": len([s for s in stocks if (s["intraday_break_count"] or 0) >= 3]),
+    }
+    print(json.dumps(wrap_meta("broken_up_pool", None, data), ensure_ascii=False))
+
+
+def limit_down_pool(args):
+    """跌停池 — 救场场景（东财 getTopicDTPool 经常返回 rc:206/data:null 假死）"""
+    import akshare as ak
+    date = args[0] if args else _trading_date().replace("-", "")
+    # akshare 内部偶发崩在某行字段为空（A 股盘后数据未结算完时），retry 一次
+    df = None
+    last_err = None
+    for attempt in range(2):
+        try:
+            df = ak.stock_zt_pool_dtgc_em(date=date)
+            break
+        except Exception as e:
+            last_err = e
+            time.sleep(2)
+    if df is None:
+        _fail(f"limit_down_pool failed after retry: {last_err}")
+
+    if df is None:
+        df = []
+    stocks = []
+    for _, row in df.iterrows() if hasattr(df, 'iterrows') else []:
+        cols = set(row.index) if hasattr(row, 'index') else set()
+        stocks.append({
+            "code": str(row.get("代码", "")),
+            "name": str(row.get("名称", "")),
+            "price": _safe_num(row.get("最新价"), float),
+            "change_pct": _safe_num(row.get("涨跌幅"), float),
+            "turnover_yuan": _safe_num(row.get("成交额"), float),
+            "circulating_mcap_yuan": _safe_num(row.get("流通市值"), float),
+            "total_mcap_yuan": _safe_num(row.get("总市值"), float),
+            "turnover_rate_pct": _safe_num(row.get("换手率"), float),
+            "industry": str(row.get("所属行业", "") or ""),
+            "consecutive_limit_down": _safe_num(row.get("连续跌停"), int) if "连续跌停" in cols else None,
+            "open_times": _safe_num(row.get("开板次数"), int) if "开板次数" in cols else None,
+            "last_limit_down_time": str(row.get("最后封板时间", "") or ""),
+        })
+    mainboard_prefixes = ("600", "601", "603", "605", "000", "001", "002", "003")
+    data = {
+        "query_date": date,
+        "total": len(stocks),
+        "stocks": stocks,
+        "mainboard_count": len([s for s in stocks if s["code"].startswith(mainboard_prefixes)]),
+    }
+    print(json.dumps(wrap_meta("limit_down_pool", None, data), ensure_ascii=False))
+
+
 def limit_up_pool(args):
     """涨停池（akshare 备份；优先用 10jqka 拿中文 high_days）"""
     import akshare as ak
@@ -403,6 +507,8 @@ def main():
         "earnings_forecast": earnings_forecast,
         "individual_info": individual_info,
         "limit_up_pool": limit_up_pool,
+        "limit_down_pool": limit_down_pool,
+        "broken_up_pool": broken_up_pool,
     }
     handler = handlers.get(endpoint)
     if not handler:

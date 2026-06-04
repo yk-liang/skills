@@ -112,21 +112,32 @@ jq '{target: .target_env, enabled: .enabled_adapters, disabled: .disabled_adapte
 ### Step 4 — 情绪温度
 
 ```bash
-./scripts/data/limit_up_pool.sh   | tee /tmp/lup.json | jq '.data | {total, mainboard_count, max_consecutive, max_streak_height, pure_streak_3plus_count}'
-./scripts/data/limit_down_pool.sh | tee /tmp/ldp.json | jq '.data.total'
-./scripts/data/dragon_tiger.sh    > /tmp/dt.json
+./scripts/data/limit_up_pool.sh    | tee /tmp/lup.json | jq '.data | {total, mainboard_count, max_consecutive, max_streak_height, pure_streak_3plus_count}'
+./scripts/data/limit_down_pool.sh  | tee /tmp/ldp.json | jq '.data | {total, mainboard_count}'
+./scripts/data/broken_up_pool.sh   | tee /tmp/bup.json | jq '.data | {total, mainboard_count, high_break_count}'
+./scripts/data/dragon_tiger.sh     > /tmp/dt.json
 ```
 
-提取（注意字段语义见 `scripts/data/README.md` 连板字段语义表）：
-- 涨停家数（剔除 ST）：`jq '.data.stocks | map(select(.name | contains("ST") | not)) | length' /tmp/lup.json`
-- 主板涨停家数：`.data.mainboard_count`
-- **最高真连板**：`.data.max_consecutive`（这是"几连板"的真实数字，例如 3 = 3 连板）
-- **最高炒作高度**：`.data.max_streak_height`（含断板，"7 天 5 板"算 5）
-- 真连板 ≥ 3 票数：`.data.pure_streak_3plus_count`
-- 跌停家数：`/tmp/ldp.json` 取 `.data.total`
-- 首板晋级率：今天 `consecutive_limit_up == 2` 数量 ÷ 昨天 `consecutive_limit_up == 1` 数量；< 30% 视为退潮
+报告**必须**明确区分（之前的 bug：把"主板涨停 68"误读为"全市场 68"，与同花顺 app 的 78 全市场对不上）：
+- **全市场涨停**：`.data.total`（全市场，含创业板/科创板/北交所）
+- **主板涨停**：`.data.mainboard_count`（仅 600/601/603/605/000/001/002/003）
+- **全市场跌停**：跌停池 `.data.total`
+- **炸板数**：炸板池 `.data.total`（今日触涨停后被打开的票，同花顺 app 的"涨停打开"）
+- **高频炸板**：`.data.high_break_count`（炸板 ≥ 3 次的票数，市场承接极弱信号）
+- **最高真连板**：涨停池 `.data.max_consecutive`（"几连板"真实数字）
+- **最高炒作高度**：`.data.max_streak_height`（含断板，"7 天 5 板"算 5；与真连板不同）
+- **真连板 ≥ 3 票数**：`.data.pure_streak_3plus_count`
+- **首板晋级率**：今天 `consecutive_limit_up == 2` 数量 ÷ 昨天 `consecutive_limit_up == 1` 数量；< 30% 视为退潮
 
 ⚠️ **绝不要把 `streak_height`、`ladder_label` 里的数字（如"7天5板"的 5）当作连板数**。判断"打不打连板"用 `consecutive_limit_up`。
+
+⚠️ **报告里"涨停 N"必须明确是全市场还是主板**。推荐写法："全市场涨停 78（其中主板 68），跌停 7，炸板 19（高频炸板 5）"。
+
+**炸板数解读**（同花顺 app 的核心情绪指标）：
+- 炸板 < 5 + 涨停 ≥ 50 → 健康市场，承接强
+- 炸板 10-20 + 涨停 50-80 → 分歧加大，谨慎追高
+- 炸板 ≥ 20 或 high_break_count ≥ 5 → **接力意愿弱，退潮预警**
+- 炸板数 / 涨停数 比例 ≥ 25% → 同上
 
 按 `references/playbooks.md` 的「退潮期 / 情绪冰点」章节判断今天是否退潮、是否冰点临近。
 

@@ -245,8 +245,10 @@ ths::limit_up_pool() {
   # 同花顺涨停池有权威的 high_days 中文标签 "首板/2连板/3连板"
   # 也有 open_num（≈ 东财 zbc）、reason_type（涨停原因）、is_again_limit（断板反包标志）
   local date_param="${1:-$(date +%Y%m%d)}"
-  # 同花顺 limit 上限 200（实测：limit=300 → status_code=-1 "limit must be less than or equal to 200"）
-  local url="http://data.10jqka.com.cn/dataapi/limit_up/limit_up_pool?page=1&limit=200&field=199112,10,9001,330323,330324,330325,9002,330329,133971,9003,9004&filter=HS&order_field=199112&order_type=0&date=${date_param}"
+  # 同花顺 limit 上限 200（实测）。filter 不传 → 拿全市场（沪深主+创业+科创+北交所）
+  # mainboard_count 由 adapter 内部按代码前缀统计
+  # 之前 filter=HS 拿到的是沪深主板（漏算"全市场涨停数"），导致 agent 把主板 68 误读为"全市场 68"
+  local url="http://data.10jqka.com.cn/dataapi/limit_up/limit_up_pool?page=1&limit=200&field=199112,10,9001,330323,330324,330325,9002,330329,133971,9003,9004&order_field=199112&order_type=0&date=${date_param}"
   local resp; resp=$(ths::_get "$url" "http://q.10jqka.com.cn/zt/") || return 1
   local status_code; status_code=$(printf '%s' "$resp" | jq -r '.status_code // -1')
   if [ "$status_code" != "0" ]; then
