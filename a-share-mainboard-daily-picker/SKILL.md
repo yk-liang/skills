@@ -210,11 +210,13 @@ jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $
 每个 `sector_rank` 输出已带 `breadth_pct`（板内上涨家数比例）和 `leader_*`。然后对 Top 5–10 个候选板块：
 
 ```bash
-./scripts/data/sector_kline.sh BK1013 7      # 板块近 7 日 K，看持续性
+./scripts/data/sector_kline.sh BK1013 60     # 板块 60 日 K + MACD + 中枢（缠论 ④ 客观阶段判定）
 ./scripts/data/sector_constituents.sh BK1013 # 板内成分股，过滤主板
 ```
 
 按 `references/sector-screening.md` 的 6 步给每个板块定阶段：**主升 / 新启动 / 补涨 / 轮动 / 退潮 / 修复**。
+
+**2026-06 推荐**：用 `references/sector-screening.md` 的 **Step 2.5 缠论中枢化客观判定** 作主判（看 `sector_kline.sh` 输出的 `chanlun_levels` + `zhongshu` 直接映射阶段）；Step 2 主观判定作辅助验证。两套冲突时以客观为准 + 标"低置信度"。
 
 **只有处于主升 / 新启动 / 修复阶段的板块才进入 Step 7**。轮动、退潮板块不选个股；用户持仓若属退潮板块 → Step 6 强制减仓。
 
@@ -223,18 +225,19 @@ jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $
 
 ```bash
 ./scripts/data/quote.sh 600519                 # 当日行情
-./scripts/data/kline.sh 600519 60 1d           # 60 日 K + 5/10/20/60 均线（脚本已计算）
+./scripts/data/kline.sh 600519 60 1d           # 60 日 K + 5/10/20/60 均线 + MACD + 中枢 + 缠论买卖点（脚本已计算）
 ./scripts/data/announcements.sh 600519 30      # 近 30 日公告（含 risk/catalyst keyword 检测）
 ./scripts/data/financials.sh 600519            # 最近 8 期财务
 ```
 
-按 `references/playbooks.md`「持仓评估清单」过 6 项：
+按 `references/playbooks.md`「持仓评估清单」过 7 项（2026-06 加 G 项缠论 ② 顶背驰预警）：
 - 板块阶段（用 Step 5 结论）：主升保持持有 / 退潮强制减仓
 - 趋势是否破坏？（kline 输出含 ma5/10/20/60，看价格 vs 均线）
 - 是否触发三段式卖点？（强一致日 / 第一次放量震荡 / 跌破 5 日线）
 - 是否有公告催化或减持/问询/异动负面？（announcements 输出 `risk_keywords_hit` 直接给标签）
 - 是否适合做 T 解套（**只做正T，绝不做倒T** — 电网设备 ETF 案例）
 - 仓位再平衡（单票 ≤ 15%、单板块 ≤ 25%）
+- **G 项 — MACD 顶背驰预警**：看 `kline` 输出的 `macd_divergence.top_divergence` 和 `chanlun_levels` — 出现一类卖点 + 趋势完整（中枢 valid=false）→ 减仓 30%
 
 输出：每只一个状态（继续持有 / 减仓 X% / 做 T / 止损出局 / 暂不动观察）+ 触发条件。
 

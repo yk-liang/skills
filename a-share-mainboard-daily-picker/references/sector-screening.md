@@ -49,6 +49,38 @@
 - 板块"是否新启动" → 看东财板块详情页的近 5 日 K 线（板块自己也有日 K）
 - 板块"持续天数" → 看近 5 日板块涨幅，连续 3 天涨 ≥ 1.5% 算持续
 
+### Step 2.5 — 缠论中枢化客观判定（2026-06 加，推荐替代 Step 2 主观判定）
+
+主观词容易在 agent 之间产生分歧（同一板块"主升"vs"新启动"判断不同）。用 `sector_kline.sh` 输出的 `zhongshu` + `chanlun_levels` 字段做**客观判定**：
+
+```bash
+./scripts/data/sector_kline.sh BK1136 60 | jq '{
+  macd_trend: .data.macd_last.trend,
+  top_div: .data.macd_divergence.top_divergence,
+  bottom_div: .data.macd_divergence.bottom_divergence,
+  zhongshu: .data.zhongshu,
+  chanlun: .data.chanlun_levels
+}'
+```
+
+**输出 → 阶段映射**：
+
+| `chanlun_levels` / `macd_last` / `zhongshu` 状态 | 客观对应阶段 |
+|---|---|
+| 三类买点 + macd 金叉 / 多头 | **主升 / 新启动** |
+| 一类买点（底背驰）+ 当前价在中枢下沿附近 | **修复** |
+| 中枢 valid=true + chanlun_levels 为空 + 量缩 | **轮动** |
+| 三类卖点 / 收盘价 < 中枢下沿 | **退潮** |
+| 一类卖点（顶背驰）+ 价格在中枢上沿附近 | **主升末端**（持仓减仓） |
+| 突破中枢上沿但未回踩 | **新启动**（仓位减半试错） |
+
+**主观判定（Step 2）与客观判定（Step 2.5）冲突时**：
+- 以**客观为准**写入报告主结论
+- agent 在报告里**两套都列**（"主观判：X / 客观判：Y"），让用户复核
+- 出现冲突的板块标"低置信度"
+
+注：板块阶段保留 6 阶段定义（主升/新启动/补涨/轮动/退潮/修复），改的只是**判定方法**（从"看 K 线感觉"到"看脚本输出"）。
+
 ### Step 3 — 检查板块**宽度**（breadth）
 对每个候选板块，打开成分股列表，看：
 - 板内总股数

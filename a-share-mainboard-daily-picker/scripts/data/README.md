@@ -23,7 +23,7 @@ scripts/data/
 │   ├── itick.sh             # iTick adapter（官方付费源，需 ITICK_TOKEN；5 req/min）
 │   └── finnhub.sh           # finnhub adapter（占位 — 将来给美股/港股用）
 ├── quote.sh <code>                      # 实时行情
-├── kline.sh <code> [days] [period]      # K 线（含 5/10/20/60 均线计算）
+├── kline.sh <code> [days] [period]      # K 线（含 5/10/20/60 均线 + MACD + 中枢 + 缠论买卖点）
 ├── index_quote.sh <index>               # 指数行情（上证 / 深证 / 创业板）
 ├── sector_rank.sh [type]                # 板块涨幅榜（concept/industry）
 ├── sector_constituents.sh <board_code>  # 板块成分股
@@ -172,6 +172,30 @@ cd ~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker
 环境变量 `SOURCE=xxx` 可强制单源（诊断/测试用）：`SOURCE=10jqka ./scripts/data/quote.sh 600519`
 
 环境变量 `PW_HEADED=1` 让 playwright 浏览器可见（人工验证用）。
+
+## K 线后处理（kline_enrich.py — 缠论字段）
+
+`kline.sh` 和 `sector_kline.sh` 调用 dispatcher 后会自动 pipe 到 `lib/kline_enrich.py` 做后处理，在原输出基础上加：
+
+- **MACD 指标**：每根 bar 加 `macd_dif` / `macd_dea` / `macd_hist`
+- **MACD 最新摘要**：`data.macd_last = {dif, dea, hist, trend}` (trend ∈ 金叉/死叉/多头/空头)
+- **MACD 背驰检测**：`data.macd_divergence = {top_divergence, bottom_divergence, peaks_count, troughs_count, top_detail, bottom_detail}`
+  - top_divergence：价格创新高但 MACD 柱体未跟上 → 顶背驰（卖出预警，缠论 ②）
+  - bottom_divergence：价格创新低但 MACD 柱体收敛 → 底背驰（买入预警）
+- **缠论中枢**：`data.zhongshu = {valid, upper, lower, midpoint, height_pct, fenxing_count, n_recent_bars}`
+  - 简化版：在最近 30 根 K 找局部分型，取顶分型最小值 = 上沿、底分型最大值 = 下沿
+  - valid=true：盘整中枢；valid=false：趋势段中（无重叠区）
+- **缠论买卖点**：`data.chanlun_levels = [{type, reason, risk, stop_loss_hint}, ...]`
+  - 一类买点：MACD 底背驰（抄底信号，高风险）
+  - 三类买点：突破中枢上沿后回踩不破（趋势延续型，A 股主板最稳定买点）
+  - 一类卖点：MACD 顶背驰（必须减仓）
+  - 三类卖点：跌破中枢下沿后反弹未过（清仓信号）
+
+**依赖**：需要 conda env 的 Python（无外部库依赖，纯 Python stdlib）
+
+**降级**：Python 不可用时 → 直接输出原始 K 线（不带 MACD/中枢），不会失败
+
+**MACD warmup**：K 线少于 26 根 → `data.macd_warmup_required: true`，跳过缠论分析
 
 ## 已知数据停披
 
