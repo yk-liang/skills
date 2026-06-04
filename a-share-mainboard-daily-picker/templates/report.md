@@ -132,6 +132,17 @@
 
 ---
 
+## 数据源状态（来自 setup.sh --check）
+
+- target python：[/path/to/python (3.12)，环境类型：conda-named / venv-local / system / custom]
+- **本次启用 adapter**：eastmoney / 10jqka / cninfo / [...]
+- **未启用 adapter**：
+  - [adapter 名]：影响 [endpoint 列表]；建议 `./scripts/setup.sh` 启用
+
+> 如果有未启用的 adapter，本次报告的数据可能走了备援源 — 不影响结论可信度，但下次跑 setup 可提升稳定性。
+
+---
+
 ## 明日操作预案（按时点列）
 
 1. **开盘前 8:30–9:15**
