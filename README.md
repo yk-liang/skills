@@ -10,29 +10,49 @@
 
 ## 安装
 
-每个 skill 是一个独立子目录，安装方式是把它符号链接到 `~/.claude/skills/`：
+每个 skill 是独立子目录。Claude Code 支持**两种安装位置**，按 skill 的作用域选：
 
+### 全局安装（所有项目可用）
+适用于跨项目通用的 skill（如 update-config、init 这种）。
 ```bash
-# 1. clone 到本地工作目录（仅首次）
-mkdir -p ~/AiCodingWorkspace
-cd ~/AiCodingWorkspace
-git clone git@github.com:yk-liang/skills.git
-
-# 2. 把要启用的 skill symlink 到 ~/.claude/skills/
-ln -s ~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker ~/.claude/skills/a-share-mainboard-daily-picker
-
-# 3. 重启 Claude Code（或开新 session），skill 就能被识别和触发
+ln -s ~/AiCodingWorkspace/skills/<skill> ~/.claude/skills/<skill>
 ```
+
+### 项目级安装（仅在特定项目目录下的 session 可用）
+适用于**项目独立性强**的 skill（如 a-share-mainboard-daily-picker 只在炒股项目里用）。
+```bash
+mkdir -p <project>/.claude/skills
+ln -s ~/AiCodingWorkspace/skills/<skill> <project>/.claude/skills/<skill>
+```
+
+### 首次 clone
+```bash
+mkdir -p ~/AiCodingWorkspace && cd ~/AiCodingWorkspace
+git clone git@github.com:yk-liang/skills.git
+```
+
+### 怎么选？
+- **跨项目复用** → 全局
+- **依赖特定项目数据**（如 a-share 需读 stock 项目下的 holdings.md / reports/）→ **项目级**（避免在其他项目里误触发）
+- **隐私敏感**（含账户信息、个人经验）→ 项目级（限定作用域）
+
+## 当前各 skill 的推荐位置
+
+| skill | 推荐位置 | 理由 |
+|---|---|---|
+| a-share-mainboard-daily-picker | `~/AiCodingWorkspace/stock/.claude/skills/` | 仅炒股用；含账户金额/具体亏损案例 |
 
 ## 开发流程
 
 ```bash
 cd ~/AiCodingWorkspace/skills
-# 改 skill 源文件 …（symlink 让 Claude Code 实时看到改动）
+# 改 skill 源文件（symlink 让 Claude Code 实时看到改动，不论装在全局还是项目级）
 git add <skill>
 git commit -m "<skill>: 改了什么"
 git push
 ```
+
+无论 symlink 装在哪，源始终是 `~/AiCodingWorkspace/skills/<skill>/`，编辑这里即可。
 
 ## 仓库约定
 

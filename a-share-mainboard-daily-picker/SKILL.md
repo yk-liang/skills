@@ -69,6 +69,12 @@ description: A股主板晚间复盘 + 明日预案 skill。夜间盘后调本目
 
 ### Step 2 — 启动自检（依赖 + adapter 状态）
 
+skill 源代码在 `~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker/`（git 仓库 yk-liang/skills 的一个 skill），通过 symlink 安装到：
+- **项目级**：`~/AiCodingWorkspace/stock/.claude/skills/a-share-mainboard-daily-picker/`（推荐 — 仅炒股项目下 session 加载，含账户隐私）
+- 或**全局**：`~/.claude/skills/a-share-mainboard-daily-picker/`（不推荐 — 会在所有项目暴露）
+
+调脚本时用源路径或 symlink 路径都行（脚本内部用 `BASH_SOURCE` 自定位 lib，不依赖工作目录）：
+
 ```bash
 cd ~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker
 ./scripts/setup.sh --check > /tmp/skill_env.json
