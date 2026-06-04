@@ -50,12 +50,13 @@ ak::_run() {
 }
 
 ak::caps() {
-  echo "kline dragon_tiger north_flow financials_full earnings_forecast individual_info limit_up_pool limit_down_pool broken_up_pool"
+  echo "kline dragon_tiger north_flow north_flow_history financials_full earnings_forecast individual_info limit_up_pool limit_down_pool broken_up_pool"
 }
 
-ak::kline()             { ak::_run kline "$@"; }
-ak::dragon_tiger()      { ak::_run dragon_tiger "$@"; }
-ak::north_flow()        { ak::_run north_flow "$@"; }
+ak::kline()                { ak::_run kline "$@"; }
+ak::dragon_tiger()         { ak::_run dragon_tiger "$@"; }
+ak::north_flow()           { ak::_run north_flow "$@"; }
+ak::north_flow_history()   { ak::_run north_flow_history "$@"; }
 ak::financials_full()   { ak::_run financials_full "$@"; }
 ak::earnings_forecast() { ak::_run earnings_forecast "$@"; }
 ak::individual_info()   { ak::_run individual_info "$@"; }

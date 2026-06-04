@@ -29,6 +29,7 @@ dispatch::_chain_for() {
     limit_down_pool)                       echo "akshare eastmoney playwright" ;;
     broken_up_pool)                        echo "akshare" ;;
     north_flow)                            echo "akshare eastmoney" ;;
+    north_flow_history)                    echo "akshare" ;;
     dragon_tiger)                          echo "akshare eastmoney" ;;
     *)                                     echo "eastmoney" ;;
   esac

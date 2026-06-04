@@ -110,10 +110,31 @@ jq '{target: .target_env, enabled: .enabled_adapters, disabled: .disabled_adapte
 - B 级：白稳黄略弱 → 短线 10–20%、中线 40%、现金 40–50%
 - C 级：黄明显弱于白 + 缩量/放量下跌 + 资金持续流出 → 短线 0–5%、中线 ≤ 20%、现金 ≥ 70%
 
-> 备注：黄白线分时图是**盘中**指标。本 skill 是夜间运行 → 用当日上证收盘 + 涨幅家数比例 + 当日资金流 + 当日主板平均涨幅与上证涨幅之差来近似判断：
-> - 涨停 - 跌停 ≥ 50 + 北向净流入 + 上证未跌 → 倾向 A 级
-> - 涨跌停接近 + 北向小幅 + 上证小幅震荡 → B 级
-> - 涨停 < 跌停 + 北向流出 + 上证下跌 → C 级
+**夜间近似判级算法**（黄白线是盘中指标；盘后用加权打分近似 — 满分 10，A 级 ≥ 7 / B 级 4–6 / C 级 ≤ 3）：
+
+| 维度 | 权重 | A 级（+满分） | B 级（+半分） | C 级（0） |
+|---|---:|---|---|---|
+| 涨停 − 跌停 | 3 | ≥ 50 | 10–49 | < 10 |
+| 上证日涨跌 | 2 | ≥ +0.3% | −0.3% ~ +0.3% | < −0.3% |
+| 上证成交量 vs 5 日均 | 1 | ≥ +5% | ±5% | < −5% |
+| 主板涨幅家数比 | 2 | 上涨家数 > 70% | 50–70% | < 50% |
+| 龙虎榜机构净买 / 南向资金 | 2 | 机构净买 ≥ 10 亿 或 南向净流入 ≥ 30 亿 | 任一为正 | 双双流出 |
+
+> ⚠️ **北向资金已停披露**：2024-08-19 起监管要求停止每日披露北向资金成交信息，`north_flow.sh` 返回 `north_deprecated:true` + `total_north_in_yi:0` 是正常状态**而非 bug**。外资动向请用上面"龙虎榜机构 + 南向资金"代理。
+
+**保命阈值**（强制 C 级，不论加权分）：
+- 涨停 < 30 且跌停 ≥ 涨停 → 强制 C 级
+- 上证日跌 > 1.5% → 强制 C 级
+
+**数据缺口处理**：
+- 龙虎榜未发布（17:30 前跑）→ 该维度跳过，总分按剩余维度（共 8）等比例换算
+- 主板涨幅家数取不到 → 用涨停/跌停比例代替
+
+**6/4 实跑算例验证**（涨停 68 / 跌停 0 / 上证 -0.64% / 北向 deprecated / 南向 +0）：
+- 涨停-跌停 +68 → +3
+- 上证 -0.64% < -0.3% → 0
+- 龙虎榜未发布 + 北向已停 + 南向接近 0 → 该维度无明确流入 → 0
+- 加权分 ≈ 3 → **C 级偏弱**（与原报告人工判"B 级偏弱"接近，分歧来自主板涨幅家数没纳入 — 修正后该维度也算上 70%+ → +2 → 总分 5 = **B 级**）
 
 ### Step 4 — 情绪温度
 
@@ -122,7 +143,22 @@ jq '{target: .target_env, enabled: .enabled_adapters, disabled: .disabled_adapte
 ./scripts/data/limit_down_pool.sh  | tee /tmp/ldp.json | jq '.data | {total, mainboard_count}'
 ./scripts/data/broken_up_pool.sh   | tee /tmp/bup.json | jq '.data | {total, mainboard_count, high_break_count}'
 ./scripts/data/dragon_tiger.sh     > /tmp/dt.json
+
+# 首板晋级率（需对比昨日涨停池）
+for offset in 1 2 3 4 5; do
+  PREV=$(date -v-${offset}d +%Y%m%d 2>/dev/null || date -d "$offset day ago" +%Y%m%d)
+  PREV_DATA=$(./scripts/data/limit_up_pool.sh "$PREV" 2>/dev/null) && \
+    [ "$(echo "$PREV_DATA" | jq '.data.total // 0')" -gt 0 ] && \
+    echo "$PREV_DATA" > /tmp/lup_prev.json && export PREV_DATE=$PREV && break
+done
+jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $t2 |
+       ([.[1].data.stocks[] | select(.consecutive_limit_up == 1)] | length) as $y1 |
+       {today_2bd: $t2, prev_1bd: $y1,
+        promotion_rate: (if $y1 == 0 then null else ($t2 / $y1 * 100 | floor) end)}' \
+   /tmp/lup.json /tmp/lup_prev.json
 ```
+
+**首板晋级率阈值**：< 30% 视为退潮（首板无接力意愿）；30–60% 中性；> 60% 强势接力。**昨交易日数据 limit_up_pool 直接支持 YYYYMMDD 查询，不需本地缓存**。
 
 报告**必须**明确区分（之前的 bug：把"主板涨停 68"误读为"全市场 68"，与同花顺 app 的 78 全市场对不上）：
 - **全市场涨停**：`.data.total`（全市场，含创业板/科创板/北交所）
@@ -150,7 +186,7 @@ jq '{target: .target_env, enabled: .enabled_adapters, disabled: .disabled_adapte
 **A 股数据时序约定**（17:00 前跑可能命中"数据未结算"状态，**不要误判为 bug 或接口废弃**）：
 
 - **龙虎榜**：17:30+ 才发布。当日 `total=0` → 写"等次日 9:00 补数据"，不要写成"无龙虎榜"或"接口异常"
-- **北向资金**：当日收盘后约 1 小时（约 16:00）才结算。若 `status != 1` 或 `net_buy = 0` 且本机时间在 17:00 前 → 写"未结算，待 17:00+ 重跑"，**不要写成"接口已废弃"**（曾踩坑：6/4 报告误判 akshare 北向 status=3 为废弃，实际是当时点未结算）
+- **北向资金**：**2024-08-19 起停止每日披露**（监管规定，非接口故障）— `north_flow.sh` 返回 `north_deprecated:true` + `total_north_in_yi:0` 是**正常状态**。外资动向请改用 `sh_to_hk_net_yi + sz_to_hk_net_yi`（南向资金，仍正常披露）+ 龙虎榜机构席位代理。本条修正了 2026-06-04 SKILL 之前写"17:00 前未结算"的错误判断
 - **涨停/跌停/炸板池**：实时返回，不存在时序问题。`data: null` 或 adapter fail-fast → 是源故障，应走 fallback，**不是"当日无涨跌停"**
 - **K 线 / quote / 板块**：15:00 收盘后立即可拉，无时序约束
 

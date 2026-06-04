@@ -30,7 +30,8 @@ scripts/data/
 ├── sector_kline.sh <board_code> [days]  # 板块 K 线（看持续性）
 ├── limit_up_pool.sh [date]              # 涨停板池（含连板高度、封板时间）
 ├── limit_down_pool.sh [date]            # 跌停板池
-├── north_flow.sh                        # 北向资金净流入
+├── north_flow.sh                        # 沪深港通当日（北向已停披，仅返回南向）
+├── north_flow_history.sh [days]         # 北向资金历史每日（自 2024-08-19 停披后多为 null）
 ├── dragon_tiger.sh [date]               # 龙虎榜
 ├── announcements.sh <code> [days]       # 巨潮公告
 └── financials.sh <code>                 # 财务核心字段
@@ -161,6 +162,7 @@ cd ~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker
 | `limit_up_pool` | **10jqka → eastmoney → akshare** | 10jqka 优先（中文 ladder_label 更直观）|
 | `sector_rank` / `sector_constituents` / `sector_kline` | **eastmoney → playwright** | akshare/10jqka 都没有等价接口；playwright 浏览器内 fetch 是唯一救场 |
 | `north_flow` / `dragon_tiger` | **akshare → eastmoney** | akshare 用不同 URL 路径，比东财 datacenter 稳得多 |
+| `north_flow_history` | **akshare** | 仅历史回看用（北向每日数据 2024-08-19 起停披露） |
 | `financials` | **eastmoney → akshare** | akshare 提供完整三表（akshare 是 `financials_full` endpoint）|
 | `financials_full` / `earnings_forecast` | **akshare** | 仅 akshare 实现 |
 | `individual_info` | **akshare → eastmoney → playwright** | 三级防线 |
@@ -170,6 +172,18 @@ cd ~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker
 环境变量 `SOURCE=xxx` 可强制单源（诊断/测试用）：`SOURCE=10jqka ./scripts/data/quote.sh 600519`
 
 环境变量 `PW_HEADED=1` 让 playwright 浏览器可见（人工验证用）。
+
+## 已知数据停披
+
+**北向资金每日数据 — 自 2024-08-19 起停止披露**：
+
+- 监管要求停止每日实时披露北向资金成交信息（沪股通/深股通净买额）
+- `north_flow.sh` 当前输出会有 `"north_deprecated": true` + `"total_north_in_yi": 0` — **这是正常状态而非接口故障**
+- `north_flow_history.sh` 拿到的 2024-08-19 之后所有日期 net_buy_yi 均为 null，仅 2014–2024-08-18 有效（历史回看用）
+- **替代外资动向指标**：
+  - **南向资金**：仍正常披露（`north_flow.sh` 输出 `sh_to_hk_net_yi` / `sz_to_hk_net_yi`）
+  - **龙虎榜机构席位**：`dragon_tiger.sh` 输出机构买入/卖出（聪明钱代理）
+  - **主板涨跌停比**：宽口径资金偏好（不专属外资但反映整体情绪）
 
 ## 已知限制 / 风控注意
 

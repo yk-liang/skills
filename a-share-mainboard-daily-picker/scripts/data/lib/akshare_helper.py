@@ -200,13 +200,23 @@ def north_flow(args):
     sh2hk = next((r for r in rows if "港股通(沪)" in r["channel"]), None)
     sz2hk = next((r for r in rows if "港股通(深)" in r["channel"]), None)
 
+    # 检测北向资金停披情况（自 2024-08-19 起监管要求停止每日披露）
+    north_status = (hk2sh or {}).get("status", 0)
+    north_net = (hk2sh["net_buy_yi"] if hk2sh else 0) + (hk2sz["net_buy_yi"] if hk2sz else 0)
+    deprecated = (north_status == 3) and (north_net == 0)
+    notice = None
+    if deprecated:
+        notice = "北向资金每日数据 2024-08-19 起停止披露（监管规定），status=3 + net=0 是正常状态而非接口故障；请改用南向资金 / 龙虎榜机构席位 / 主板涨跌停比 作为外资动向代理"
+
     data = {
         "raw_rows": rows,
         "hk_to_sh_net_yi": hk2sh["net_buy_yi"] if hk2sh else None,
         "hk_to_sz_net_yi": hk2sz["net_buy_yi"] if hk2sz else None,
         "sh_to_hk_net_yi": sh2hk["net_buy_yi"] if sh2hk else None,
         "sz_to_hk_net_yi": sz2hk["net_buy_yi"] if sz2hk else None,
-        "total_north_in_yi": (hk2sh["net_buy_yi"] if hk2sh else 0) + (hk2sz["net_buy_yi"] if hk2sz else 0),
+        "total_north_in_yi": north_net,
+        "north_deprecated": deprecated,
+        "deprecated_notice": notice,
         "ssec_up_count": hk2sh["up_count"] if hk2sh else None,
         "ssec_down_count": hk2sh["down_count"] if hk2sh else None,
         "ssec_change_pct": hk2sh["index_change_pct"] if hk2sh else None,
@@ -494,6 +504,98 @@ def limit_up_pool(args):
     print(json.dumps(wrap_meta("limit_up_pool", None, data), ensure_ascii=False))
 
 
+def north_flow_history(args):
+    """北向资金历史每日数据 + 5/20/30 日累计净流入
+
+    args: [days_back]  默认 30
+    返回每日净买额 + 5/20/30 日累计 + 趋势判断
+    """
+    import akshare as ak
+    days_back = int(args[0]) if args else 30
+
+    try:
+        df = ak.stock_hsgt_hist_em(symbol="北向资金")
+    except Exception as e:
+        _fail(f"north_flow_history failed: {e}")
+
+    if df is None or len(df) == 0:
+        _fail("north_flow_history returned empty")
+
+    # 防御性字段名识别（akshare 字段中文名偶有变化）
+    date_col = None
+    net_col = None
+    for c in df.columns:
+        cs = str(c)
+        if "日期" in cs and date_col is None:
+            date_col = c
+        if ("成交净买额" in cs or "当日成交净买额" in cs) and net_col is None:
+            net_col = c
+    if not net_col:
+        for c in df.columns:
+            if "净买额" in str(c):
+                net_col = c
+                break
+
+    if not date_col or not net_col:
+        _fail(f"north_flow_history: cannot locate date/net columns in {list(df.columns)}")
+
+    df_sorted = df.sort_values(date_col, ascending=False).head(days_back)
+
+    import math as _math
+    daily = []
+    nan_count = 0
+    for _, row in df_sorted.iterrows():
+        raw = row[net_col]
+        try:
+            net_val = float(raw)
+            if _math.isnan(net_val):
+                nan_count += 1
+                net_val = None
+        except (TypeError, ValueError):
+            nan_count += 1
+            net_val = None
+        daily.append({
+            "date": str(row[date_col]),
+            "net_buy_yi": round(net_val, 2) if net_val is not None else None,
+        })
+
+    # 检测北向资金停披情况（自 2024-08-19 起监管要求停止每日披露）
+    deprecated = nan_count >= len(daily) * 0.9
+    notice = None
+    if deprecated:
+        notice = "北向资金每日数据 2024-08-19 起停止披露（监管规定），近期值全为 null 是正常状态；本端点保留用于历史回看"
+
+    nets = [d["net_buy_yi"] for d in daily if d["net_buy_yi"] is not None]
+    cum_5d  = round(sum(nets[:5]),  2) if len(nets) >= 5  else None
+    cum_20d = round(sum(nets[:20]), 2) if len(nets) >= 20 else None
+    cum_30d = round(sum(nets[:30]), 2) if len(nets) >= 30 else None
+
+    if cum_5d is not None and cum_20d is not None:
+        if cum_5d > 0 and cum_20d > 0:
+            trend = "持续净流入"
+        elif cum_5d > 0 and cum_20d < 0:
+            trend = "短期转流入（20日仍净流出）"
+        elif cum_5d < 0 and cum_20d > 0:
+            trend = "短期转流出（20日仍净流入）"
+        else:
+            trend = "持续净流出"
+    elif deprecated:
+        trend = "数据已停披（2024-08-19 起）"
+    else:
+        trend = "数据不足"
+
+    data = {
+        "daily": daily,
+        "cum_5d_yi":  cum_5d,
+        "cum_20d_yi": cum_20d,
+        "cum_30d_yi": cum_30d,
+        "trend": trend,
+        "days_returned": len(daily),
+        "deprecated_notice": notice,
+    }
+    print(json.dumps(wrap_meta("north_flow_history", None, data), ensure_ascii=False))
+
+
 def main():
     if len(sys.argv) < 2:
         _fail("usage: akshare_helper.py <endpoint> [args...]")
@@ -503,6 +605,7 @@ def main():
         "kline": kline,
         "dragon_tiger": dragon_tiger,
         "north_flow": north_flow,
+        "north_flow_history": north_flow_history,
         "financials_full": financials_full,
         "earnings_forecast": earnings_forecast,
         "individual_info": individual_info,
