@@ -186,7 +186,7 @@ jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $
 - 炸板 < 5 + 涨停 ≥ 50 → 健康市场，承接强
 - 炸板 10-20 + 涨停 50-80 → 分歧加大，谨慎追高
 - 炸板 ≥ 20 或 high_break_count ≥ 5 → **接力意愿弱，退潮预警**
-- 炸板数 / 涨停数 比例 ≥ 25% → 同上
+- 炸板率 ≥ 25% → 同上。**炸板率 = 炸板数 / (涨停数 + 炸板数)**，不是 炸板/涨停（涨停只含封住的，两者互斥，分母必须加总才是"今日触及涨停的总票数"）
 
 按 `references/playbooks.md` 的「退潮期 / 情绪冰点」章节判断今天是否退潮、是否冰点临近。
 
@@ -277,7 +277,7 @@ jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $
 ### Step 8 — 红线复核
 用 `references/scoring.md` 末尾的 Red-flag list 再过一遍候选池：
 - ST/*ST、退市预警、审计保留意见
-- 大股东减持公告（`announcements.risk_keywords_hit.shareholder_reduction = true`）
+- 大股东减持公告（`announcements.risk_keywords_hit.shareholder_reduction = true`）— 注意区分：`shareholder_reduction=true` 是**新减持计划/正在减持**，才是红旗；`shareholder_reduction_completed=true` 是**减持实施完毕/终止/承诺不减持**，属利空落地（中性偏好），**不进回避池**
 - 异常波动公告无基本面支撑（`abnormal_volatility = true`）
 - 连续一字板（`limit_up_pool` 里 `break_count == 0` + 多日 `consecutive_limit_up`）
 - 数据脚本失败 + agent-browser 也拿不到 → 标"数据缺口"，**不要硬选**

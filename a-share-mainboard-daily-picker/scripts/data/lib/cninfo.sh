@@ -100,9 +100,11 @@ cn::announcements() {
         is_important: ((.announcementType // "") | test("重要"))
       })),
       risk_keywords_hit: (
-        ((.announcements // []) | map(.announcementTitle) | join(" ")) as $titles |
+        ((.announcements // []) | map(.announcementTitle)) as $title_list |
+        ($title_list | join(" ")) as $titles |
         {
-          shareholder_reduction: ($titles | test("减持")),
+          shareholder_reduction: ([$title_list[] | select(test("减持")) | select(test("实施完毕|期限届满|终止减持|不减持|承诺不") | not)] | length > 0),
+          shareholder_reduction_completed: ([$title_list[] | select(test("减持")) | select(test("实施完毕|期限届满"))] | length > 0),
           regulatory_inquiry: ($titles | test("问询函|监管函|警示函|立案调查")),
           performance_warning: ($titles | test("预亏|大幅下滑|业绩.*下降")),
           abnormal_volatility: ($titles | test("异常波动")),
