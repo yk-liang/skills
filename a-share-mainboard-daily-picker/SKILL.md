@@ -48,13 +48,9 @@ description: A股主板晚间复盘 + 明日预案 skill。夜间盘后调本目
    - **不可作入选论证主体**：入选/回避的因果链必须由一手数据支撑（量价、板块共振、K 线结构、巨潮公告原文、财务、龙虎榜席位）
    - 反面措辞示例：❌"该股属于 CPO 主线，因此入选"；✅"光纤光缆主线（亨通/长飞/中天 3 只主板同向 + 亨通 26Q1 扣非 +108%）"
    - 区别要点："用 reason_type 找什么"（OK）vs "用 reason_type 说明为什么涨"（不 OK）
-4. **股票池两层白名单**（2026-06 改造）：
-   - **选股池**（实操买入候选）：默认 A股主板（600/601/603/605/000/001/002/003），按代码前缀过滤
-   - **评估池**（板块风向标 / 龙头识别 / 强势提示）：允许观察创业板 300/301、科创板 688/689、北交所 8/4 的强势标的；用于：
-     - 板块阶段判定（板块涨幅含非主板成分时不能漏看）
-     - 龙头识别（板块龙头即使是 20cm/30cm 也要知道它是龙头）
-     - 报告「评估池外强势提示」段 — 告诉用户"白名单外今晚有 X 板块爆发 / Y 标的领涨"，由用户决定是否调整选股池
-   - 用户明确说"看创业板/科创板"才放开**选股池**（默认评估池一直开着）
+4. **股票池两层白名单**：
+   - **选股池**：仅主板（600/601/603/605/000/001/002/003）
+   - **评估池**：创业板/科创板/北交所可观察作板块风向标和龙头识别，报告末尾写「评估池外强势提示」，但不进候选池。用户明确说"看创业板/科创板"才放开选股池
 5. **板块先行**：选个股**之前**必须先做板块筛选（见 `references/sector-screening.md`）。任何候选都必须能回答"属于哪个板块、板块当前是什么阶段"。板块不在主升/新启动/修复中，**不选个股**。
 6. **不追高的硬阈值**：5D 涨幅 > 20% 或 20D > 35% 或 60D > 60% → 触发 `scoring.md`「追高阈值表」对应封顶（25 分制下 5D>20% 封顶 13 / 20D>35% 封顶 10 / 60D>60% 封顶 6），并标注"追高风险"。除非有用户**明确要求**做加速。
 7. **用观察池语言**：用「候选池 / 观察池 / 回避池」，禁止"必涨""稳赚""推荐买入"。
@@ -84,31 +80,20 @@ description: A股主板晚间复盘 + 明日预案 skill。夜间盘后调本目
 
 ### Step 2 — 启动自检（依赖 + adapter 状态）
 
-skill 源代码在 `~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker/`（git 仓库 yk-liang/skills 的一个 skill），通过 symlink 安装到：
-- **项目级**：`~/AiCodingWorkspace/stock/.claude/skills/a-share-mainboard-daily-picker/`（推荐 — 仅炒股项目下 session 加载，含账户隐私）
-- 或**全局**：`~/.claude/skills/a-share-mainboard-daily-picker/`（不推荐 — 会在所有项目暴露）
-
-调脚本时用源路径或 symlink 路径都行（脚本内部用 `BASH_SOURCE` 自定位 lib，不依赖工作目录）：
-
 ```bash
 cd ~/AiCodingWorkspace/skills/a-share-mainboard-daily-picker
 ./scripts/setup.sh --check > /tmp/skill_env.json
 jq '{target: .target_env, enabled: .enabled_adapters, disabled: .disabled_adapters}' /tmp/skill_env.json
 ```
 
-把 `enabled_adapters` 和 `disabled_adapters` **写到报告"数据源状态"段**（见输出格式末尾），让用户知道本次哪些防线启用。
+把 `enabled/disabled_adapters` 写到报告"数据源状态"段。akshare 缺 → 龙虎榜/北向/财务受影响；playwright 缺 → 板块榜风控时无救场。
 
-如果 `akshare` 或 `playwright` 在 disabled 列表里，**报告里必须明确提醒**：
-- akshare 缺：dragon_tiger / north_flow / financials_full / earnings_forecast 会用 fallback 或报"数据缺口"
-- playwright 缺：sector_rank 在东财风控时无救场
-
-同时验证主源能跑：
+验证主源：
 ```bash
 ./scripts/data/quote.sh 600519 | jq '.meta.source, .data.price'
 ```
-应该看到 source（可能是 eastmoney / 10jqka 任一，按 fallback chain 自动选）+ 一个数字。**不要硬编码 SOURCE=xxx** — dispatcher 会自动选最稳的。
 
-**禁止**：不要硬编码 `navigate`/`click` 等浏览器子命令；不要调任何 LLM 中介源（i问财等）；不要自动 pip install — 缺依赖时引导用户跑 `./scripts/setup.sh`。
+**禁止**：不要硬编码 SOURCE；不要调 LLM 中介源；不要自动 pip install — 缺依赖引导用户跑 `./scripts/setup.sh`。
 
 ### Step 3 — 大盘判级（A/B/C）
 
@@ -145,12 +130,6 @@ jq '{target: .target_env, enabled: .enabled_adapters, disabled: .disabled_adapte
 - 龙虎榜未发布（17:30 前跑）→ 该维度跳过，总分按剩余维度（共 8）等比例换算
 - 主板涨幅家数取不到 → 用涨停/跌停比例代替
 
-**6/4 实跑算例验证**（涨停 68 / 跌停 0 / 上证 -0.64% / 北向 deprecated / 南向 +0）：
-- 涨停-跌停 +68 → +3
-- 上证 -0.64% < -0.3% → 0
-- 龙虎榜未发布 + 北向已停 + 南向接近 0 → 该维度无明确流入 → 0
-- 加权分 ≈ 3 → **C 级偏弱**（与原报告人工判"B 级偏弱"接近，分歧来自主板涨幅家数没纳入 — 修正后该维度也算上 70%+ → +2 → 总分 5 = **B 级**）
-
 ### Step 4 — 情绪温度
 
 ```bash
@@ -175,7 +154,7 @@ jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $
 
 **首板晋级率阈值**：< 30% 视为退潮（首板无接力意愿）；30–60% 中性；> 60% 强势接力。**昨交易日数据 limit_up_pool 直接支持 YYYYMMDD 查询，不需本地缓存**。
 
-报告**必须**明确区分（之前的 bug：把"主板涨停 68"误读为"全市场 68"，与同花顺 app 的 78 全市场对不上）：
+报告**必须**明确区分：
 - **全市场涨停**：`.data.total`（全市场，含创业板/科创板/北交所）
 - **主板涨停**：`.data.mainboard_count`（仅 600/601/603/605/000/001/002/003）
 - **全市场跌停**：跌停池 `.data.total`
@@ -201,7 +180,7 @@ jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $
 **A 股数据时序约定**（17:00 前跑可能命中"数据未结算"状态，**不要误判为 bug 或接口废弃**）：
 
 - **龙虎榜**：17:30+ 才发布。当日 `total=0` → 写"等次日 9:00 补数据"，不要写成"无龙虎榜"或"接口异常"
-- **北向资金**：**2024-08-19 起停止每日披露**（监管规定，非接口故障）— `north_flow.sh` 返回 `north_deprecated:true` + `total_north_in_yi:0` 是**正常状态**。外资动向请改用 `sh_to_hk_net_yi + sz_to_hk_net_yi`（南向资金，仍正常披露）+ 龙虎榜机构席位代理。本条修正了 2026-06-04 SKILL 之前写"17:00 前未结算"的错误判断
+- **北向资金**：**2024-08-19 起停止每日披露**（监管规定），`north_deprecated:true` 是正常状态。外资动向改用南向资金（`sh_to_hk_net_yi` / `sz_to_hk_net_yi`）+ 龙虎榜机构席位代理
 - **涨停/跌停/炸板池**：实时返回，不存在时序问题。`data: null` 或 adapter fail-fast → 是源故障，应走 fallback，**不是"当日无涨跌停"**
 - **K 线 / quote / 板块**：15:00 收盘后立即可拉，无时序约束
 
@@ -379,15 +358,4 @@ jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $
 
 ## 引用资源
 
-- `scripts/data/README.md` — **数据层架构**：统一 schema、adapter 协议、加新数据源步骤
-- `scripts/data/<name>.sh` — 12 个数据获取脚本（quote / kline / index_quote / sector_rank / sector_constituents / sector_kline / limit_up_pool / limit_down_pool / north_flow / dragon_tiger / announcements / financials）
-- `scripts/data/lib/` — adapter 实现（eastmoney 主源 / cninfo 公告源 / itick 官方 fallback / finnhub 占位）
-- `references/data-sources.md` — 各数据源职责矩阵 + 字段约定 + 故障降级策略
-- `references/sector-screening.md` — 板块筛选 6 步流程 + 板块阶段判定 + 板块 → 个股映射规则（**Step 5 的核心**）
-- `references/playbooks.md` — 大盘判级、票型识别、退潮期纪律、仓位公式、三段式卖法、持仓评估清单
-- `references/scoring.md` — 评分维度（按票型分别给分）+ 红线清单
-- `references/case-library.md` — 用户历史案例（永鼎、诺德、新能泰山、福莱特等）
-- `references/experience-notes.md` — 用户经验沉淀（动态更新）
-- `references/notion-import-guide.md` — Notion 经验导入流程
-- `templates/holdings.md` — 持仓 markdown 模板
-- `templates/report.md` — 每日报告模板
+按需读取 `references/`（playbooks / scoring / sector-screening / case-library / experience-notes / data-sources）、`scripts/data/README.md`、`templates/`（report / holdings）。
