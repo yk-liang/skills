@@ -203,7 +203,7 @@ jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $
 
 按 `references/sector-screening.md` 的 6 步给每个板块定阶段：**主升 / 新启动 / 补涨 / 轮动 / 退潮 / 修复**。
 
-**2026-06 推荐**：用 `references/sector-screening.md` 的 **Step 2.5 缠论中枢化客观判定** 作主判（看 `sector_kline.sh` 输出的 `chanlun_levels` + `zhongshu` 直接映射阶段）；Step 2 主观判定作辅助验证。两套冲突时以客观为准 + 标"低置信度"。
+**推荐**：用 `references/sector-screening.md` 的 **Step 2.5 缠论中枢化客观判定** 作主判（看 `sector_kline.sh` 输出的 `chanlun_levels` + `zhongshu` 直接映射阶段）；Step 2 主观判定作辅助验证。两套冲突时以客观为准 + 标"低置信度"。
 
 **只有处于主升 / 新启动 / 修复阶段的板块才进入 Step 7**。轮动、退潮板块不选个股；用户持仓若属退潮板块 → Step 6 强制减仓。
 
@@ -217,7 +217,7 @@ jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $
 ./scripts/data/financials.sh 600519            # 最近 8 期财务
 ```
 
-按 `references/playbooks.md`「持仓评估清单」过 7 项（2026-06 加 G 项缠论 ② 顶背驰预警）：
+按 `references/playbooks.md`「持仓评估清单」过 7 项：
 - 板块阶段（用 Step 5 结论）：主升保持持有 / 退潮强制减仓
 - 趋势是否破坏？（kline 输出含 ma5/10/20/60，看价格 vs 均线）
 - 是否触发三段式卖点？（强一致日 / 第一次放量震荡 / 跌破 5 日线）
