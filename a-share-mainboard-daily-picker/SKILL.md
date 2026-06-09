@@ -152,7 +152,13 @@ jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $
    /tmp/lup.json /tmp/lup_prev.json
 ```
 
-**首板晋级率阈值**：< 30% 视为退潮（首板无接力意愿）；30–60% 中性；> 60% 强势接力。**昨交易日数据 limit_up_pool 直接支持 YYYYMMDD 查询，不需本地缓存**。
+**首板晋级率解读**：
+- < 20% → 退潮信号（接力意愿极弱）
+- 20–40% → 中性偏弱（**不单独触发退潮判定**，须配合其他退潮条件）
+- 40–60% → 中性
+- > 60% → 强势接力
+
+**重要**：晋级率**不是退潮的单一判据**。涨停 > 100 + 指数涨 + 晋级率低 → 说明市场活跃但梯队换血快（高波动高分化），不等于退潮。退潮须命中 `playbooks.md` 退潮期判定的 5 条中 ≥ 2 条。
 
 报告**必须**明确区分：
 - **全市场涨停**：`.data.total`（全市场，含创业板/科创板/北交所）
@@ -180,7 +186,7 @@ jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $
 **A 股数据时序约定**（17:00 前跑可能命中"数据未结算"状态，**不要误判为 bug 或接口废弃**）：
 
 - **龙虎榜**：17:30+ 才发布。当日 `total=0` → 写"等次日 9:00 补数据"，不要写成"无龙虎榜"或"接口异常"
-- **北向资金**：**2024-08-19 起停止每日披露**（监管规定），`north_deprecated:true` 是正常状态。外资动向改用南向资金（`sh_to_hk_net_yi` / `sz_to_hk_net_yi`）+ 龙虎榜机构席位代理
+- **北向资金**：**已永久停披**（2024-08-19 起监管规定），`north_deprecated:true` 是正常状态，**不要在报告里当作"数据缺口"**。外资动向改用南向资金（`sh_to_hk_net_yi` / `sz_to_hk_net_yi`）+ 龙虎榜机构席位
 - **涨停/跌停/炸板池**：实时返回，不存在时序问题。`data: null` 或 adapter fail-fast → 是源故障，应走 fallback，**不是"当日无涨跌停"**
 - **K 线 / quote / 板块**：15:00 收盘后立即可拉，无时序约束
 
@@ -203,7 +209,13 @@ jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $
 
 按 `references/sector-screening.md` 的 6 步给每个板块定阶段：**主升 / 新启动 / 补涨 / 轮动 / 退潮 / 修复**。
 
-**推荐**：用 `references/sector-screening.md` 的 **Step 2.5 缠论中枢化客观判定** 作主判（看 `sector_kline.sh` 输出的 `chanlun_levels` + `zhongshu` 直接映射阶段）；Step 2 主观判定作辅助验证。两套冲突时以客观为准 + 标"低置信度"。
+**推荐**：用 `sector_kline.sh` 输出的 `chanlun_levels` + `zhongshu` 做客观阶段判定（见 `sector-screening.md` Step 2.5）。两套冲突时以客观为准 + 标"低置信度"。
+
+**⚠️ 东财 IP 风控处理**：`sector_kline.sh` 依赖东财 push2his 域名，**容易被 IP 级临时封锁**（表现为全部板块 K 线返回空）。此时：
+- **不阻塞流程**：跳过中枢客观判定，退回 Step 2 主观判定（看涨幅持续性 + 板内宽度 + 龙头连板）
+- 报告标注"板块 K 线受限，阶段判定为主观"
+- 个股 K 线（`kline.sh`）不受影响（用同花顺 fallback）
+- 通常 5-30 分钟自动解封，次日再跑大概率恢复
 
 **只有处于主升 / 新启动 / 修复阶段的板块才进入 Step 7**。轮动、退潮板块不选个股；用户持仓若属退潮板块 → Step 6 强制减仓。
 

@@ -136,7 +136,7 @@ def kline(args):
 def dragon_tiger(args):
     """龙虎榜 — 救场场景（我们 datacenter URL 经常返回 0）"""
     import akshare as ak
-    date = args[0] if args else _trading_date()
+    date = (args[0] if args and args[0] else None) or _trading_date()
     date_compact = date.replace("-", "")
     try:
         df = ak.stock_lhb_detail_em(start_date=date_compact, end_date=date_compact)
@@ -291,10 +291,26 @@ def financials_full(args):
     print(json.dumps(wrap_meta("financials_full", code, out), ensure_ascii=False))
 
 
+def _latest_quarter_end():
+    """动态算最近已完成的季度末：Q1=0331, Q2=0630, Q3=0930, Q4=1231"""
+    from datetime import date as _date
+    today = _date.today()
+    m = today.month
+    y = today.year
+    if m <= 3:
+        return f"{y-1}1231"
+    elif m <= 6:
+        return f"{y}0331"
+    elif m <= 9:
+        return f"{y}0630"
+    else:
+        return f"{y}0930"
+
+
 def earnings_forecast(args):
     """业绩预告 — 报告期 (YYYYMMDD 格式，季度末)"""
     import akshare as ak
-    date = args[0] if args else "20260331"  # 默认最近季度末
+    date = (args[0] if args and args[0] else None) or _latest_quarter_end()
     try:
         df = ak.stock_yjyg_em(date=date)
     except Exception as e:
@@ -365,7 +381,7 @@ def _safe_num(v, cast=float, default=None):
 def broken_up_pool(args):
     """炸板池 — 今日触及涨停后被打开（市场情绪关键指标，同花顺 app 显示的"涨停打开"）"""
     import akshare as ak
-    date = args[0] if args else _trading_date().replace("-", "")
+    date = (args[0] if args and args[0] else None) or _trading_date().replace("-", "")
     df = None
     last_err = None
     for attempt in range(2):
@@ -413,7 +429,7 @@ def broken_up_pool(args):
 def limit_down_pool(args):
     """跌停池 — 救场场景（东财 getTopicDTPool 经常返回 rc:206/data:null 假死）"""
     import akshare as ak
-    date = args[0] if args else _trading_date().replace("-", "")
+    date = (args[0] if args and args[0] else None) or _trading_date().replace("-", "")
     # akshare 内部偶发崩在某行字段为空（A 股盘后数据未结算完时），retry 一次
     df = None
     last_err = None
@@ -459,7 +475,7 @@ def limit_down_pool(args):
 def limit_up_pool(args):
     """涨停池（akshare 备份；优先用 10jqka 拿中文 high_days）"""
     import akshare as ak
-    date = args[0] if args else _trading_date().replace("-", "")
+    date = (args[0] if args and args[0] else None) or _trading_date().replace("-", "")
     try:
         df = ak.stock_zt_pool_em(date=date)
     except Exception as e:
