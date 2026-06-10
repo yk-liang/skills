@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 板块 K 线（看板块持续性 + 缠论中枢识别）：./sector_kline.sh <board_code> [days=30]
-# fallback chain：eastmoney → playwright
-# 后处理：dispatch 输出 pipe 到 kline_enrich.py 加 MACD + 中枢 + 缠论买卖点
-# 用途：板块阶段判定从主观词改为客观（突破中枢上沿 = 主升 / 跌破下沿 = 退潮）
+# 板块 K 线 + 缠论中枢识别：./sector_kline.sh <board_code_or_name> [days=60]
+# fallback chain：eastmoney → 10jqka（按板块名查询） → playwright
+# 后处理：pipe 到 kline_enrich.py 加 MACD + 中枢 + 缠论买卖点
+# 东财 IP 风控时 10jqka 独立可用（仅限同花顺有对应板块的情况，覆盖 ~70%）
 set -euo pipefail
-[ $# -ge 1 ] || { echo "Usage: $0 <board_code> [days=30]" >&2; exit 2; }
+[ $# -ge 1 ] || { echo "Usage: $0 <board_code_or_name> [days=60]" >&2; exit 2; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/_dispatch.sh"
 source "$SCRIPT_DIR/lib/_python.sh"

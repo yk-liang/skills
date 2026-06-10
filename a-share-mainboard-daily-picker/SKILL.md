@@ -211,11 +211,16 @@ jq -s '([.[0].data.stocks[] | select(.consecutive_limit_up == 2)] | length) as $
 
 **推荐**：用 `sector_kline.sh` 输出的 `chanlun_levels` + `zhongshu` 做客观阶段判定（见 `sector-screening.md` Step 2.5）。两套冲突时以客观为准 + 标"低置信度"。
 
-**⚠️ 东财 IP 风控处理**：`sector_kline.sh` 依赖东财 push2his 域名，**容易被 IP 级临时封锁**（表现为全部板块 K 线返回空）。此时：
-- **不阻塞流程**：跳过中枢客观判定，退回 Step 2 主观判定（看涨幅持续性 + 板内宽度 + 龙头连板）
-- 报告标注"板块 K 线受限，阶段判定为主观"
-- 个股 K 线（`kline.sh`）不受影响（用同花顺 fallback）
-- 通常 5-30 分钟自动解封，次日再跑大概率恢复
+**⚠️ 东财 IP 风控处理**：`sector_kline.sh` 依赖东财 push2his 域名，**容易被 IP 级临时封锁**（表现为全部板块 K 线返回空）。此时**用板块龙头个股 K 线代替**：
+```bash
+# sector_kline 失败时的替代方案：用板块龙头个股做中枢判定
+# 龙头代码从 sector_rank 输出的 leader_code 字段取
+./scripts/data/kline.sh <leader_code> 60 1d | jq '.data.chanlun_levels, .data.zhongshu'
+```
+- 龙头个股 K 线走 10jqka fallback，**不受东财封锁影响**
+- 龙头的趋势结构 ≈ 板块整体趋势（龙头是板块的代理）
+- 报告标注"板块 K 线受限，用龙头 <code> K 线代替做缠论判定"
+- 同时可用 `ths_sector_kline.py` 对**行业板块**（同花顺 88xxxx）拿 K 线作交叉验证
 
 **只有处于主升 / 新启动 / 修复阶段的板块才进入 Step 7**。轮动、退潮板块不选个股；用户持仓若属退潮板块 → Step 6 强制减仓。
 

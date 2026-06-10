@@ -68,7 +68,7 @@ ths::wrap_meta() {
 }
 
 ths::caps() {
-  echo "quote kline index_quote limit_up_pool"
+  echo "quote kline index_quote limit_up_pool sector_kline"
 }
 
 # 同花顺代码前缀：A 股都是 hs_<code>；指数也是 hs_<code>
@@ -328,7 +328,21 @@ ths::limit_up_pool() {
 # 不实现的（让 dispatcher fall through）
 ths::sector_rank()        { echo "10jqka: sector_rank not implemented" >&2; return 1; }
 ths::sector_constituents() { echo "10jqka: sector_constituents not implemented" >&2; return 1; }
-ths::sector_kline()       { echo "10jqka: sector_kline not implemented" >&2; return 1; }
+ths::sector_kline() {
+  # 同花顺行业板块K线（881xxx）— 东财被封时的独立 fallback
+  # 参数：$1=BK代码或板块名  $2=天数
+  # 需要板块名做模糊匹配，BK代码无法直接映射
+  # sector_rank 输出含 board_name，sector_kline.sh 可把名称作为第一个参数传入
+  local board_name="${1:-}"
+  local days="${2:-60}"
+  local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local py; py=$(skill_python 2>/dev/null || true)
+  if [ -z "$py" ]; then
+    echo "10jqka: sector_kline requires python" >&2
+    return 1
+  fi
+  "$py" "$script_dir/ths_sector_kline.py" "$board_name" "$days"
+}
 ths::limit_down_pool()    { echo "10jqka: limit_down_pool not implemented" >&2; return 1; }
 ths::north_flow()         { echo "10jqka: north_flow not implemented" >&2; return 1; }
 ths::dragon_tiger()       { echo "10jqka: dragon_tiger not implemented" >&2; return 1; }

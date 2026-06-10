@@ -24,7 +24,8 @@ dispatch::_chain_for() {
     earnings_forecast)                     echo "akshare" ;;
     individual_info)                       echo "akshare eastmoney playwright" ;;
     announcements)                         echo "cninfo" ;;
-    sector_rank|sector_constituents|sector_kline) echo "eastmoney playwright" ;;
+    sector_rank|sector_constituents) echo "eastmoney playwright" ;;
+    sector_kline)                          echo "eastmoney 10jqka playwright" ;;
     limit_up_pool)                         echo "10jqka eastmoney akshare" ;;
     limit_down_pool)                       echo "akshare eastmoney playwright" ;;
     broken_up_pool)                        echo "akshare" ;;
